@@ -8,7 +8,7 @@ using Spectre.Console.Cli;
 
 namespace OvenTracker.Commands;
 
-public sealed class AnalyzeSettings : AdjustmentSettings
+public sealed class AnalyzeSettings : SharedSettings
 {
     [CommandArgument(0, "<FOLDERS>")]
     [Description("One or more runs' folders (each with readings.csv and session.json), or readings.csv files. Several runs are analysed together: runs of the same setpoints at different thermostat adjustments measure how far the adjustment moves the oven.")]
@@ -113,6 +113,7 @@ public sealed class AnalyzeCommand : Command<AnalyzeSettings>
             Options = Options(info),
             ToleranceC = s.Tolerance is { } t ? f.DeltaFromDisplay(t) : info.ToleranceC,
             Adjust = s.BuildOptions(unit, info.Adjust),
+            Sensor = s.ResolveSensor(info.Sensor, unit), // e.g. --probe 80bk-a on a run made without it
         };
 
         var report = new Report(info, results);

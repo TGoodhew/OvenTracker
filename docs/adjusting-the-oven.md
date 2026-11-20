@@ -14,8 +14,9 @@ GE electronic ovens of that era work the same way, and the first half of this pa
 - Tell the app the oven's current adjustment. `run` asks at the start, or give it with `--adjustment`. The
   adjustment is **added to whatever is already set**, so without it the report can only say how much to
   change it by (see [Correcting an oven that already has an adjustment](#correcting-an-oven-that-already-has-an-adjustment)).
-- Don't adjust for offsets of a few degrees. The probe itself is only good to about ±4 °F (see
-  [Is it worth adjusting?](#is-it-worth-adjusting)).
+- Don't adjust for an offset smaller than the probe's own accuracy: ±4 °F for a standard type K
+  thermocouple, and ±6 to ±8 °F for a Fluke 80BK-A at 350–450 °F. Tell the app which probe with
+  `--probe` (see [Is it worth adjusting?](#is-it-worth-adjusting)).
 - After any adjustment, run the tracker again to check it.
 
 ## What the report says
@@ -108,9 +109,17 @@ long the oven really needs.
 
 ## Is it worth adjusting?
 
-The measurement has limits. A standard type K thermocouple is accurate to ±4 °F (±2.2 °C) at normal
-baking temperatures, and the U1253B adds a little more. So an offset of 3 °F may come from the probe,
-not the oven. The report's *How far to trust it* section gives the figure at your highest setpoint.
+The measurement has limits, and the probe sets most of them. A standard-grade type K thermocouple is
+accurate to ±4 °F (±2.2 °C) at normal baking temperatures. A particular probe may be looser: the Fluke
+80BK-A is specified at ±2.2 °C or ±2 %, whichever is greater, so ±6.4 °F at 350 °F and ±8.4 °F at 450 °F.
+The U1253B adds a little more. So an offset smaller than the probe's accuracy may come from the probe, not
+the oven.
+
+The report's *How far to trust it* section gives the figure at your highest setpoint. It's right only if
+the app knows the probe: give `--probe 80bk-a` (or `--probe-tolerance 2.2C,2%` for another probe, from
+its datasheet) when you run. `analyze "<run folder>" --probe 80bk-a` applies it to a run you've already
+made. The 80BK-A is also rated only to 260 °C (500 °F). The app warns before a run if a setpoint's
+first peak and swing could take it past that, and says so if a reading does.
 
 The PHS925 manual says "Use your new oven for a few weeks to become more familiar with it. If you still
 think your new oven is too hot or too cold, you can adjust the thermostat yourself" (owner's manual,
@@ -119,8 +128,8 @@ small offset doesn't matter.
 
 | Offset (average over your setpoints) | Suggested action |
 | --- | --- |
-| Under 5 °F either way | Leave it. This is within the probe's own accuracy. |
-| 5 to 15 °F | Optional. Adjust if your baking shows it (cakes doming or browning too fast, or under-done centres), or if you want it exact. |
+| Within the probe's accuracy (under 5 °F for a standard type K, under about 7 °F for an 80BK-A) | Leave it. The probe can't tell it from no error. |
+| From there to 15 °F | Optional. Adjust if your baking shows it (cakes doming or browning too fast, or under-done centres), or if you want it exact. |
 | Over 15 °F | Adjust. This is enough to affect most recipes. |
 | Over 35 °F | The PHS925 can only adjust 35 °F. Set the maximum, re-run the tracker, and consider a service call: the oven sensor may be faulty. |
 

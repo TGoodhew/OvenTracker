@@ -23,9 +23,13 @@ public sealed record MeterIdentity(string Manufacturer, string Model, string Ser
 /// <see cref="LimitFraction"/> of the temperature, or the two added together when
 /// <see cref="LimitsAdd"/> is set (as RTD classes are written).
 /// </summary>
-/// <param name="Name">For people, e.g. "type K thermocouple".</param>
-public sealed record Sensor(string Name, double LimitC, double LimitFraction, bool LimitsAdd = false)
+/// <param name="Name">For people, e.g. "type K thermocouple" or "Fluke 80BK-A type K probe".</param>
+/// <param name="MaxC">The highest temperature the probe is rated for, when known (260 °C for a Fluke 80BK-A).</param>
+public sealed record Sensor(string Name, double LimitC, double LimitFraction, bool LimitsAdd = false, double? MaxC = null)
 {
+    /// <summary>A generic sensor type ("type K thermocouple"), as opposed to a particular probe: its tolerance is that grade's.</summary>
+    public bool IsGenericType => Name.StartsWith("type ", StringComparison.Ordinal);
+
     /// <summary>The sensor's standard tolerance at a temperature, in °C either way.</summary>
     public double ToleranceC(double c) =>
         LimitsAdd ? LimitC + LimitFraction * Math.Abs(c) : Math.Max(LimitC, LimitFraction * Math.Abs(c));

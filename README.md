@@ -18,7 +18,12 @@ thermostat swings, and how bake and convection differ.
 ## What you need
 
 - U1253B with a type K thermocouple in the temperature input, dial on temperature (°C or °F; the app
-  reads whichever the meter shows).
+  reads whichever the meter shows). Tell the app which probe it is, so the report gives its real accuracy
+  and range: `--probe 80bk-a` for a Fluke 80BK-A (±2.2 °C or 2 %, rated to 260 °C / 500 °F), `--probe
+  type-k-special` for a special-limits thermocouple, or `--probe-tolerance 2.2C,2% --probe-max 260C` from
+  any probe's datasheet. Without it, the report assumes a standard-grade type K (±2.2 °C or 0.75 %).
+  `analyze --probe …` applies it to runs already made. The probe's insulation must be rated for your highest
+  setpoint, and the app warns if a setpoint could take the probe past its rating.
 - **The meter's auto power-off turned off.** The U1253B switches itself off after 10 minutes by default,
   and reading it over Bluetooth doesn't keep it on, so it would switch off in the middle of every setpoint.
   To turn it off: hold the button that steps through the functions at the dial's position (button 4 in the
