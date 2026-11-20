@@ -110,6 +110,8 @@ public class RunSettings : SharedSettings
         if (base.Validate() is { Successful: false } adjustment) return adjustment;
         if (Meter is not null && MeterDrivers.Find(Meter) is null) return ValidationResult.Error($"--meter must be one of: {MeterDrivers.Names}.");
         if (Simulate && Meter is not null && MeterDrivers.Find(Meter)?.IsSimulation != true) return ValidationResult.Error("--simulate can't be used with another --meter.");
+        if ((Resource ?? Port) is { } where && ResourceSpec.Parse(where) is null)
+            return ValidationResult.Error($"--resource \"{where}\" isn't one the app understands. Examples: COM5, COM5:9600,E,7,2 (with serial settings), /dev/ttyUSB0, GPIB0::22::INSTR.");
         if (Port is not null && Resource is not null && !string.Equals(Port, Resource, StringComparison.OrdinalIgnoreCase))
             return ValidationResult.Error("Give the meter's location once, with --resource.");
         if (Unit is not null && Temp.ParseUnit(Unit) is null) return ValidationResult.Error("--unit must be F or C.");

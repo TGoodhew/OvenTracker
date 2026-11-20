@@ -4,15 +4,18 @@ using System.Text;
 namespace OvenTracker.Meter;
 
 /// <summary>A U1253B reached through a serial port: the U1177A's Bluetooth SPP port, or a U1173 cable. Found and opened by <see cref="U1253BDriver"/>.</summary>
-public sealed class U1253BMeter(string portName) : ITemperatureMeter
+/// <param name="settings">The port's settings: 9600 8N1 unless given in --resource.</param>
+public sealed class U1253BMeter(string portName, SerialSettings? settings = null) : ITemperatureMeter
 {
+    readonly SerialSettings serial = settings ?? SerialSettings.U1250;
     SerialPort? port;
     MeterConfig? config;
     int readsSinceConfig;
 
     public string PortName => portName;
     public MeterConfig? LastConfig => config;
-    public string Location => portName;
+    /// <summary>The port, with its settings when they aren't the usual 9600 8N1.</summary>
+    public string Location => serial == SerialSettings.U1250 ? portName : $"{portName}:{serial}";
 
     /// <summary>The configuration is re-read every this many readings, so turning the dial is noticed quickly.</summary>
     public int ConfigEvery { get; init; } = 5;
@@ -22,14 +25,11 @@ public sealed class U1253BMeter(string portName) : ITemperatureMeter
     public MeterIdentity Connect()
     {
         Disconnect();
-        var p = new SerialPort(portName, U1253BProtocol.BaudRate, Parity.None, 8, StopBits.One)
-        {
-            Handshake = Handshake.None,
-            NewLine = "\n",
-            Encoding = Encoding.ASCII,
-            ReadTimeout = 3000,
-            WriteTimeout = 3000,
-        };
+        var p = ResourceSpec.OpenSerial(portName, serial, dtrDsr: false);
+        p.NewLine = "\n";
+        p.Encoding = Encoding.ASCII;
+        p.ReadTimeout = 3000;
+        p.WriteTimeout = 3000;
         // Opening the outgoing Bluetooth port is what makes Windows connect to the adapter: a second or two.
         // Straight after the port was closed, the old link may still be coming down ("Element not found"),
         // so a failed open is tried again after a pause.

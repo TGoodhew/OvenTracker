@@ -31,7 +31,7 @@ public sealed class MetersCommand : Command<MetersSettings>
     public override int Execute(CommandContext context, MetersSettings s, CancellationToken cancellationToken)
     {
         var drivers = s.Meter is not null ? [MeterDrivers.Find(s.Meter)!] : MeterDrivers.All;
-        var table = new Table().Border(TableBorder.Rounded).AddColumn("Meter").AddColumn("Where").AddColumn("Device").AddColumn("Note");
+        var table = new Table().Border(TableBorder.Rounded).AddColumn("Meter").AddColumn("Where").AddColumn("Connection").AddColumn("Device").AddColumn("Note");
         if (s.Probe) table.AddColumn("Answers");
         var nothing = new List<IMeterDriver>();
 
@@ -47,7 +47,7 @@ public sealed class MetersCommand : Command<MetersSettings>
             {
                 var row = new List<string>
                 {
-                    Markup.Escape(driver.Name), Markup.Escape(c.Resource), Markup.Escape(c.Description),
+                    Markup.Escape(driver.Name), Markup.Escape(c.Resource), Markup.Escape(c.Transport), Markup.Escape(c.Description),
                     c.Note is null ? "" : c.Usable ? $"[green]{Markup.Escape(c.Note)}[/]" : $"[grey]{Markup.Escape(c.Note)}[/]",
                 };
                 if (s.Probe)
