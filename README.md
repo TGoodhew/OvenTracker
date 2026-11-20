@@ -103,3 +103,7 @@ reconnects and carries on.
 and `OvenTracker.dll` with Azure Artifact Signing before zipping. It then fails unless both are validly
 signed. Other publishers' DLLs are left alone. The signing account and tools stay outside the repository.
 Without a script the build still works, unsigned, with a warning.
+
+## License
+
+[MIT](LICENSE)

@@ -10,6 +10,7 @@
     <Version>1.0.0</Version>
     <Product>OvenTracker</Product>
     <Company>The Schnauzer Group LLC</Company>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <Copyright>© The Schnauzer Group LLC</Copyright>
     <Description>Checks an oven's temperature accuracy (bake and convection) with a Keysight U1253B over a U1177A Bluetooth adapter.</Description>
     <InvariantGlobalization>true</InvariantGlobalization>
