@@ -1,0 +1,79 @@
+using System.ComponentModel;
+using OvenTracker.Analysis;
+using Spectre.Console;
+using Spectre.Console.Cli;
+
+namespace OvenTracker.Commands;
+
+/// <summary>The options about the oven's thermostat adjustment, shared by <c>run</c> and <c>analyze</c>.</summary>
+public abstract class AdjustmentSettings : CommandSettings
+{
+    [CommandOption("--adjustment <DEG>")]
+    [Description("The oven's thermostat adjustment (offset) setting during the run, in the oven's unit, e.g. -10. Recorded, so the app can say what to set it to, and can measure how far the adjustment moves the oven from runs at different settings.")]
+    public double? Adjustment { get; set; }
+
+    [CommandOption("--objective <AIM>")]
+    [Description("What the recommended adjustment makes smallest: balanced (the overall error, the default) or minimax (the worst setpoint's error).")]
+    public string? Objective { get; set; }
+
+    [CommandOption("--favour <TEMP>")]
+    [Description("Make the oven right at this temperature, in the oven's unit (e.g. the one you bake at most), rather than across all of them.")]
+    public double? Favour { get; set; }
+
+    [CommandOption("--adjust-step <DEG>")]
+    [Description("The oven's adjustment step, in its unit. Default 1.")]
+    public double? AdjustStep { get; set; }
+
+    [CommandOption("--adjust-range <DEG>")]
+    [Description("How far the oven's adjustment goes either way, in its unit. Default 35 °F / 19 °C (the GE PHS925 goes to ±35 °F).")]
+    public double? AdjustRange { get; set; }
+
+    [CommandOption("--adjust-model <MODEL>")]
+    [Description("How the adjustment is assumed to act until runs at different settings measure it: shift (the same at every setting, the default) or gain (scaled by the oven's own error slope).")]
+    public string? AdjustModel { get; set; }
+
+    [CommandOption("--separate-adjustments")]
+    [Description("Bake and convection each have their own adjustment (most ovens have one for both).")]
+    public bool SeparateAdjustments { get; set; }
+
+    public static AdjustObjective? ParseObjective(string? text) => text?.Trim().ToLowerInvariant() switch
+    {
+        "balanced" or "least-squares" => AdjustObjective.Balanced,
+        "minimax" or "worst" => AdjustObjective.Minimax,
+        _ => null,
+    };
+
+    public static AdjustModel? ParseModel(string? text) => text?.Trim().ToLowerInvariant() switch
+    {
+        "shift" => Analysis.AdjustModel.Shift,
+        "gain" => Analysis.AdjustModel.Gain,
+        _ => null,
+    };
+
+    public override ValidationResult Validate()
+    {
+        if (Objective is not null && ParseObjective(Objective) is null) return ValidationResult.Error("--objective must be balanced or minimax.");
+        if (AdjustModel is not null && ParseModel(AdjustModel) is null) return ValidationResult.Error("--adjust-model must be shift or gain.");
+        if (AdjustStep is <= 0) return ValidationResult.Error("--adjust-step must be positive.");
+        if (AdjustRange is <= 0) return ValidationResult.Error("--adjust-range must be positive.");
+        if (Favour is <= 0) return ValidationResult.Error("--favour must be a temperature, e.g. 350.");
+        return ValidationResult.Success();
+    }
+
+    /// <summary>The adjustment options: the ones given here, over <paramref name="saved"/> (from a run), over the defaults for the unit.</summary>
+    public AdjustmentOptions BuildOptions(TempUnit unit, AdjustmentOptions? saved = null)
+    {
+        var f = new UnitFormatter(unit);
+        var o = saved ?? AdjustmentOptions.For(unit);
+        if (AdjustStep is { } step) o = o with { StepC = f.DeltaFromDisplay(step) };
+        if (AdjustRange is { } range) o = o with { RangeC = f.DeltaFromDisplay(range) };
+        if (ParseObjective(Objective) is { } objective) o = o with { Objective = objective, FavourC = Favour is null ? null : o.FavourC };
+        if (Favour is { } favour) o = o with { FavourC = f.FromDisplay(favour) };
+        if (ParseModel(AdjustModel) is { } model) o = o with { Model = model };
+        if (SeparateAdjustments) o = o with { SharedAcrossModes = false };
+        return o;
+    }
+
+    /// <summary>The adjustment given, in °C.</summary>
+    public double? AdjustmentC(TempUnit unit) => Adjustment is { } a ? new UnitFormatter(unit).DeltaFromDisplay(a) : null;
+}

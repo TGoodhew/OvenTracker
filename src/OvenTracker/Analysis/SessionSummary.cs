@@ -1,6 +1,10 @@
 namespace OvenTracker.Analysis;
 
-public sealed record TestPoint(int Index, OvenMode Mode, double SetpointC);
+/// <param name="AdjustmentC">
+/// The oven's thermostat adjustment while this point was measured, when it differs from the session's
+/// (points from several runs analysed together). Null means the session's.
+/// </param>
+public sealed record TestPoint(int Index, OvenMode Mode, double SetpointC, double? AdjustmentC = null);
 
 public sealed record PointResult(TestPoint Point, PointMetrics Metrics);
 

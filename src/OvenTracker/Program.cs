@@ -29,8 +29,9 @@ app.Configure(config =>
         .WithDescription("List the meters each kind of meter's driver can see, and which one answers.")
         .WithExample("meters", "--probe");
     config.AddCommand<AnalyzeCommand>("analyze")
-        .WithDescription("Re-run the analysis over a saved run.")
-        .WithExample("analyze", "\"Documents\\OvenTracker\\2026-11-20 1400\"", "--tolerance", "10");
+        .WithDescription("Re-run the analysis over saved runs, alone or together.")
+        .WithExample("analyze", "\"Documents\\OvenTracker\\2026-11-20 1400\"", "--tolerance", "10")
+        .WithExample("analyze", "\"Documents\\OvenTracker\\2026-11-20 1400\"", "\"Documents\\OvenTracker\\2026-11-22 0900\"", "--favour", "350");
 });
 
 return await app.RunAsync(args, cts.Token);

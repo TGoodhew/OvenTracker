@@ -73,6 +73,9 @@ public interface ITemperatureMeter : IDisposable
 public interface IOvenSimulation
 {
     void SetOven(OvenMode mode, double? setpointC);
+
+    /// <summary>Sets the simulated oven's thermostat adjustment, as --adjustment says it is.</summary>
+    void SetAdjustment(double adjustmentC);
 }
 
 public sealed class MeterException(string message, Exception? inner = null) : Exception(message, inner);

@@ -10,7 +10,7 @@ using Spectre.Console.Cli;
 
 namespace OvenTracker.Commands;
 
-public sealed class RunSettings : CommandSettings
+public sealed class RunSettings : AdjustmentSettings
 {
     [CommandOption("--meter <DRIVER>")]
     [Description("Which kind of meter: u1253b (the default) or simulated. [bold]oventracker meters[/] lists them and what each can see.")]
@@ -82,6 +82,7 @@ public sealed class RunSettings : CommandSettings
 
     public override ValidationResult Validate()
     {
+        if (base.Validate() is { Successful: false } adjustment) return adjustment;
         if (Meter is not null && MeterDrivers.Find(Meter) is null) return ValidationResult.Error($"--meter must be one of: {MeterDrivers.Names}.");
         if (Simulate && Meter is not null && MeterDrivers.Find(Meter)?.IsSimulation != true) return ValidationResult.Error("--simulate can't be used with another --meter.");
         if (Port is not null && Resource is not null && !string.Equals(Port, Resource, StringComparison.OrdinalIgnoreCase))
@@ -224,6 +225,20 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
             .Validate(t => ParseNumbers(t) is null ? ValidationResult.Error("Numbers separated by commas, please.") : ValidationResult.Success())
             .ShowAsync(AnsiConsole.Console, ct))!;
 
+        // The oven's thermostat adjustment now, so the report can say what to set it to.
+        var adjustmentC = s.AdjustmentC(unit);
+        if (adjustmentC is null && !driver.IsSimulation && !s.Yes)
+        {
+            var answer = await new TextPrompt<string>($"What is the oven's thermostat adjustment set to now, in {f.Symbol}? [grey](0 if it has never been changed; Enter if you don't know)[/]")
+                .AllowEmpty()
+                .Validate(t => t.Trim().Length == 0 || double.TryParse(t, System.Globalization.NumberStyles.Float, Inv, out _)
+                    ? ValidationResult.Success() : ValidationResult.Error("A number such as -10, or Enter."))
+                .ShowAsync(AnsiConsole.Console, ct);
+            if (double.TryParse(answer, System.Globalization.NumberStyles.Float, Inv, out var given)) adjustmentC = f.DeltaFromDisplay(given);
+        }
+
+        if (adjustmentC is { } simAdjust) oven?.SetAdjustment(simAdjust); // the simulated oven obeys --adjustment too
+
         var precisionC = s.Precision is { } p ? f.DeltaFromDisplay(p) : unit == TempUnit.Fahrenheit ? 2 / 1.8 : 1.0;
         var toleranceC = s.Tolerance is { } t ? f.DeltaFromDisplay(t) : unit == TempUnit.Fahrenheit ? 15 / 1.8 : 8.0;
         var options = new AnalysisOptions { PrecisionC = precisionC, MinCycles = s.MinCycles, MaxPointMinutes = s.MaxMinutes };
@@ -252,7 +267,7 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
 
         var outDir = s.Out ?? Path.Combine(RunsFolder(), DateTime.Now.ToString("yyyy-MM-dd HHmm", Inv));
         var info = new SessionInfo(Version, DateTimeOffset.Now, $"{identity.Manufacturer} {identity.Model}", meter.Location, unit, toleranceC, options, plan,
-            driver.Name, identity, config?.Sensor);
+            driver.Name, identity, config?.Sensor, adjustmentC, s.BuildOptions(unit));
         using var recorder = new RunRecorder(outDir, info);
         using var poller = new MeterPoller(meter, TimeSpan.FromSeconds(s.Interval), driver.IsSimulation ? s.Speed : 1, connected: true);
         poller.Start();
