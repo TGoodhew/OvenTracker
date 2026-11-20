@@ -23,6 +23,9 @@ public sealed class SimulatedOven(int seed = 1)
     /// <summary>The thermostat adjustment (offset): it moves where the thermostat holds by this much at every setting.</summary>
     public double AdjustmentC { get; set; }
 
+    /// <summary>An open door lets the hot air out many times faster.</summary>
+    public bool DoorOpen { get; set; }
+
     /// <summary>The thermostat's error at a setpoint: bake runs hot, more so at the top; convection runs cool.</summary>
     public static double BiasC(OvenMode mode, double setpointC) =>
         mode == OvenMode.Bake ? 4.0 + 0.04 * (setpointC - 177) : -5.0 + 0.01 * (setpointC - 177);
@@ -54,7 +57,7 @@ public sealed class SimulatedOven(int seed = 1)
 
             Element += ((HeaterOn ? 1 : 0) - Element) * dt / elementLag;
             var toWall = coupling * (AirC - WallC);
-            AirC += (heaterRate * Element - toWall - airLoss * (AirC - AmbientC)) * dt;
+            AirC += (heaterRate * Element - toWall - (DoorOpen ? 25 : 1) * airLoss * (AirC - AmbientC)) * dt;
             WallC += (toWall - wallLoss * (WallC - AmbientC)) / wallMass * dt;
             SensorC += (AirC - SensorC) * dt / sensorLag;
         }
@@ -96,6 +99,14 @@ public sealed class SimulatedMeter(SimulatedOven oven, double intervalSeconds) :
     public double? ReadBatteryPercent() => 81.4;
     public void SetOven(OvenMode mode, double? setpointC) => oven.Set(mode, setpointC);
     public void SetAdjustment(double adjustmentC) => oven.AdjustmentC = adjustmentC;
+
+    public void PretendUsed(double setpointC)
+    {
+        oven.Set(OvenMode.Bake, setpointC);
+        oven.Step(3600);
+        oven.Set(OvenMode.Bake, null);
+        oven.Step(120); // turned off a couple of minutes ago
+    }
     public void Dispose() { }
 }
 

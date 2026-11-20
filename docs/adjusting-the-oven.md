@@ -225,6 +225,12 @@ OvenTracker.exe analyze "Documents\OvenTracker\2026-11-20 1400" "Documents\OvenT
 Hang the probe in the same place (the centre of the oven, clear of the racks and walls) for every run, so
 that runs can be compared. Heat near the elements and walls is very different from the centre.
 
+You don't have to give up the oven for a whole session to do this. Stop after any setpoint, cook, and carry
+on later with `run --resume "<run folder>"`. If the oven is still hot, the app waits for it to cool to the
+right starting point, and tells you how long that will take (see
+[Splitting a session](../README.md#splitting-a-session-oven-reset)). The adjustment and the results are
+kept from the first sitting.
+
 ## A worked example
 
 Suppose a run at 325, 350 and 400 °F in bake gives:

@@ -47,7 +47,8 @@ public sealed class Report(SessionInfo info, IReadOnlyList<PointResult> results)
             yield return (r, v,
             [
                 Temp.ModeName(r.Point.Mode),
-                f.Setpoint(r.Point.SetpointC) + (r.Point.AdjustmentC is { } adj && adj != (info.AdjustmentC ?? 0) ? $" (adj {Adjustment(adj)})" : ""),
+                f.Setpoint(r.Point.SetpointC) + (r.Point.AdjustmentC is { } adj && adj != (info.AdjustmentC ?? 0) ? $" (adj {Adjustment(adj)})" : "")
+                    + (r.AfterReset ? " (after a reset)" : ""),
                 m.MeanC is { } mean ? f.T(mean) : "—",
                 m.OffsetC is { } off ? f.D(off) : "—",
                 m.HalfWidthC is { } hw ? f.Span(hw) : "—",
@@ -215,7 +216,10 @@ public sealed class Report(SessionInfo info, IReadOnlyList<PointResult> results)
         var sb = new StringBuilder();
         sb.AppendLine("# Oven temperature accuracy");
         sb.AppendLine();
-        sb.AppendLine($"Run {info.Started.ToLocalTime():yyyy-MM-dd HH:mm} with {info.Meter} on {info.Location}. " +
+        var sittings = info.Sittings is { Count: > 1 } list
+            ? $" in {list.Count} sittings ({string.Join(", ", list.Select(d => d.ToLocalTime().ToString("yyyy-MM-dd HH:mm", Inv)))})"
+            : "";
+        sb.AppendLine($"Run {info.Started.ToLocalTime():yyyy-MM-dd HH:mm}{sittings} with {info.Meter} on {info.Location}. " +
                       $"A setpoint is accurate when its mean, including the ±95 % interval, is within ±{f.Span(info.ToleranceC)} of the setting.");
         sb.AppendLine();
 
@@ -236,6 +240,10 @@ public sealed class Report(SessionInfo info, IReadOnlyList<PointResult> results)
                       "*Swing* is the average peak-to-peak of a cycle and *Range* the lowest and highest readings while measuring. " +
                       "*To temp* is from pressing Start to first reaching the setting (or the thermostat first turning round, for an oven that runs cold); " +
                       "*First peak* is the first high point against the setting, which is the overshoot when it is positive.");
+        if (results.Any(r => r.AfterReset))
+            sb.Append(" Setpoints marked *after a reset* were measured after a break (the run was resumed, or the oven was left to cool first), " +
+                      "so their *To temp* and *First peak* aren't comparable with the others. Their mean is.");
+        sb.AppendLine();
         sb.AppendLine();
 
         var advice = Advice();
