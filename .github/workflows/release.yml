@@ -1,0 +1,151 @@
+name: Release
+
+# Builds every package on its own system and publishes them, with a SHA256SUMS file, as one GitHub Release:
+#   OvenTracker-<version>-win-x64.zip                    Windows, needs the .NET 11 runtime (signed)
+#   OvenTracker-<version>-win-x64-self-contained.zip     Windows, everything included (signed)
+#   OvenTracker-<version>-linux-x64.tar.gz               Linux x64, needs the .NET 11 runtime
+#   OvenTracker-<version>-linux-x64-self-contained.tar.gz
+#   OvenTracker-<version>-linux-arm64.tar.gz             Linux on 64-bit ARM, e.g. a Raspberry Pi 4 or 5
+#   OvenTracker-<version>-linux-arm64-self-contained.tar.gz
+#
+# The Windows programs are signed with Azure Artifact Signing, and a release is never made with unsigned ones:
+# the Windows job fails, and nothing is published, until the 'release' environment is set up as
+# docs/releasing.md describes.
+
+on:
+  push:
+    tags:
+      - 'v*' # pushing tag v1.2.0 publishes release v1.2.0
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build and publish, e.g. 1.2.0 (no leading v). Tags the commit v<version>.'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release # never two publishes at once
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - id: v
+        shell: bash
+        env:
+          INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+        run: |
+          v="${INPUT#v}"; v="${v#V}"
+          [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.].+)?$ ]] || { echo "::error::'$v' is not an X.Y.Z version"; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "Release version: $v"
+
+  linux:
+    name: Linux (${{ matrix.rid }})
+    needs: version
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - rid: linux-x64
+            runner: ubuntu-latest
+          - rid: linux-arm64
+            runner: ubuntu-24.04-arm # built and tried on ARM itself
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Test, build and pack
+        shell: pwsh
+        run: |
+          $v = '${{ needs.version.outputs.version }}'
+          ./build.ps1 -Runtime ${{ matrix.rid }} -Version $v
+          ./build.ps1 -Runtime ${{ matrix.rid }} -Version $v -SelfContained -SkipTests
+          & ./artifacts/publish/${{ matrix.rid }}/OvenTracker --version
+          if ($LASTEXITCODE -ne 0) { throw "The packaged program didn't run ($LASTEXITCODE)." }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.rid }}
+          path: artifacts/*.tar.gz
+          if-no-files-found: error
+
+  windows:
+    name: Windows (win-x64, signed)
+    needs: version
+    # The protected 'release' environment holds the signing identity's IDs (variables, not secrets), and can
+    # require a reviewer's approval before this job runs.
+    environment: release
+    runs-on: windows-latest
+    permissions:
+      contents: read
+      id-token: write # azure/login swaps GitHub's OIDC token for the signing identity: no secret is stored
+    steps:
+      - name: Check signing is set up
+        shell: pwsh
+        run: |
+          if (-not '${{ vars.AZURE_CLIENT_ID }}') {
+            throw "The 'release' environment has no AZURE_CLIENT_ID, so the Windows programs can't be signed, and an unsigned Windows build is never released. See docs/releasing.md."
+          }
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Sign in to Azure for signing (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+      - name: Test, build, sign and pack
+        shell: pwsh
+        env:
+          ARTIFACT_SIGNING_ENDPOINT: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
+          ARTIFACT_SIGNING_ACCOUNT: ${{ vars.ARTIFACT_SIGNING_ACCOUNT }}
+          ARTIFACT_SIGNING_PROFILE: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
+        run: |
+          $v = '${{ needs.version.outputs.version }}'
+          $sign = './packaging/Sign-ArtifactSigning.ps1'
+          ./build.ps1 -Runtime win-x64 -Version $v -SignScript $sign
+          ./build.ps1 -Runtime win-x64 -Version $v -SelfContained -SkipTests -SignScript $sign
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-win-x64
+          path: artifacts/*.zip
+          if-no-files-found: error
+      - name: Sign out of Azure
+        if: always()
+        shell: pwsh
+        run: az logout; az account clear
+
+  publish:
+    name: Publish the release
+    needs: [version, linux, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # gh release create, with the workflow's own token
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum * | tee SHA256SUMS
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          gh release create "v$VERSION" dist/* \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "OvenTracker $VERSION" --generate-notes
