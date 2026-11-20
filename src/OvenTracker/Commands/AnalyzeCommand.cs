@@ -86,7 +86,11 @@ public sealed class AnalyzeCommand : Command<AnalyzeSettings>
         {
             var adj = run.Info.AdjustmentC ?? adjustmentC ?? 0;
             foreach (var r in Replay.Analyze(run.Csv, options(run.Info)))
-                results.Add(r with { Point = r.Point with { Index = results.Count + 1, AdjustmentC = adj } });
+            {
+                // A point keeps the adjustment its plan gave it (a characterisation has two); otherwise the run's.
+                var planned = run.Info.Plan.FirstOrDefault(p => p.Index == r.Point.Index)?.AdjustmentC;
+                results.Add(r with { Point = r.Point with { Index = results.Count + 1, AdjustmentC = planned ?? adj } });
+            }
         }
         var latest = ordered[^1].Info;
         return (latest with { AdjustmentC = latest.AdjustmentC ?? adjustmentC ?? 0, Plan = results.Select(r => r.Point).ToList() }, results);
