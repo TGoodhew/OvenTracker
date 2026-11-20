@@ -3,6 +3,9 @@
 This page explains what OvenTracker's report means and how to use it to correct the oven's temperature.
 It is written for the GE Profile **PHS925ST1SS** range, and the steps come from its owner's manual. Most
 GE electronic ovens of that era work the same way, and the first half of this page applies to any oven.
+Run with `--oven ge-phs925` and the app knows this oven's adjustment, its convection conversion and its
+slow cycle, and the report gives these same steps. For another oven, [describe it](adding-an-oven.md),
+and the report gives that oven's steps.
 
 ## The short version
 

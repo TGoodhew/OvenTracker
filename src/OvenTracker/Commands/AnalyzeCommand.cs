@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text.Json;
 using OvenTracker.Analysis;
+using OvenTracker.Ovens;
 using OvenTracker.Session;
 using OvenTracker.Ui;
 using Spectre.Console;
@@ -112,7 +113,8 @@ public sealed class AnalyzeCommand : Command<AnalyzeSettings>
         {
             Options = Options(info),
             ToleranceC = s.Tolerance is { } t ? f.DeltaFromDisplay(t) : info.ToleranceC,
-            Adjust = s.BuildOptions(unit, info.Adjust),
+            Oven = OvenProfiles.Find(s.Oven) ?? info.Oven,
+            Adjust = s.BuildOptions(unit, info.Adjust, OvenProfiles.Find(s.Oven) ?? info.Oven),
             Sensor = s.ResolveSensor(info.Sensor, unit), // e.g. --probe 80bk-a on a run made without it
         };
 

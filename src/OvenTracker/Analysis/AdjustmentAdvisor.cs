@@ -24,17 +24,30 @@ public enum AdjustModel
 /// <param name="RangeC">How far the adjustment goes either way (±35 °F on the PHS925).</param>
 /// <param name="FavourC">Make the oven right at this temperature, rather than across all of them.</param>
 /// <param name="SharedAcrossModes">One adjustment for bake and convection, as on most ovens.</param>
+/// <param name="KnownGains">Gains measured on this oven before (its profile's, from characterise), used when the runs don't measure one.</param>
 public sealed record AdjustmentOptions(
     double StepC,
     double RangeC,
     AdjustObjective Objective = AdjustObjective.Balanced,
     double? FavourC = null,
     AdjustModel Model = AdjustModel.Shift,
-    bool SharedAcrossModes = true)
+    bool SharedAcrossModes = true,
+    IReadOnlyDictionary<OvenMode, double>? KnownGains = null)
 {
     /// <summary>The defaults for an oven that works in this unit: 1° steps, up to ±35 °F (±19 °C).</summary>
     public static AdjustmentOptions For(TempUnit unit) =>
         unit == TempUnit.Fahrenheit ? new(1 / 1.8, 35 / 1.8) : new(1, 19);
+
+    /// <summary>
+    /// The defaults for a known oven: its step, range and sharing, and any gains measured on it. The generic
+    /// profile gives the unit's defaults, so a °C oven gets 1 °C steps.
+    /// </summary>
+    public static AdjustmentOptions For(Ovens.OvenProfile oven, TempUnit unit) => oven.IsGeneric
+        ? For(unit) with { KnownGains = Gains(oven) }
+        : new(oven.AdjustStepC, oven.AdjustRangeC, SharedAcrossModes: oven.SharedAdjustment, KnownGains: Gains(oven));
+
+    static IReadOnlyDictionary<OvenMode, double>? Gains(Ovens.OvenProfile oven) =>
+        oven.Gains is { Count: > 0 } g ? g.ToDictionary(kv => kv.Key, kv => kv.Value.Gain) : null;
 }
 
 /// <summary>One measured setpoint, and the adjustment the oven had while it was measured.</summary>
@@ -53,6 +66,7 @@ public sealed record DialCorrection(OvenMode Mode, double WantC, double SetC);
 /// <param name="Clamped">The adjustment wanted was beyond the oven's range, so this is the limit.</param>
 /// <param name="Gain">How far the oven moves per degree of adjustment.</param>
 /// <param name="GainMeasured">Whether <see cref="Gain"/> was measured (runs at different adjustments) or assumed.</param>
+/// <param name="GainFromProfile">Whether <see cref="Gain"/> came from the oven's profile (measured before by characterise).</param>
 /// <param name="GainHalfWidthC">The measured gain's uncertainty, roughly, per degree.</param>
 /// <param name="Mode">The mode this advice is for, or null for one adjustment across both.</param>
 /// <param name="AddSetpointsC">Setpoints worth adding to tell a fixed offset from one that changes with temperature.</param>
@@ -72,7 +86,8 @@ public sealed record AdjustmentAdvice(
     IReadOnlyList<DialCorrection> DialCorrections,
     IReadOnlyList<double> AddSetpointsC,
     string? TooFewSetpoints,
-    bool Curved)
+    bool Curved,
+    bool GainFromProfile = false)
 {
     public double WorstAfterC => Residuals.Count == 0 ? 0 : Residuals.Max(r => Math.Abs(r.AfterC));
 }
@@ -108,7 +123,7 @@ public static class AdjustmentAdvisor
     static AdjustmentAdvice AdviseGroup(IReadOnlyList<AdjustPoint> points, AdjustmentOptions options, double? currentC, OvenMode? mode)
     {
         var reference = currentC ?? points[^1].AdjustmentC;
-        var (gain, measured, gainHw) = Gain(points, options);
+        var (gain, measured, gainHw, fromProfile) = Gain(points, options);
 
         // Every setpoint's error as it would be at the reference adjustment, repeats averaged.
         var now = points
@@ -132,14 +147,14 @@ public static class AdjustmentAdvisor
         var residuals = now.Select(p => new Residual(p.Mode, p.SetpointC, p.OffsetC, p.OffsetC + gain * change, p.HalfWidthC)).ToList();
         return new AdjustmentAdvice(
             change, currentC, currentC is { } c ? c + change : null, clamped, gain, measured, gainHw, options, mode,
-            residuals, DialCorrections(residuals), AddSetpoints(now, out var why), why, IsCurved(now));
+            residuals, DialCorrections(residuals), AddSetpoints(now, out var why), why, IsCurved(now), fromProfile);
     }
 
     /// <summary>
     /// How far the oven moves per degree of adjustment. Measured, from the same setpoint run at
     /// different adjustments, when there are such pairs; otherwise assumed from the model.
     /// </summary>
-    static (double Gain, bool Measured, double? HalfWidth) Gain(IReadOnlyList<AdjustPoint> points, AdjustmentOptions options)
+    static (double Gain, bool Measured, double? HalfWidth, bool FromProfile) Gain(IReadOnlyList<AdjustPoint> points, AdjustmentOptions options)
     {
         double num = 0, den = 0, variance = 0;
         foreach (var g in points.GroupBy(p => (p.Mode, Key: Math.Round(p.SetpointC / SameSetpointC))))
@@ -156,14 +171,18 @@ public static class AdjustmentAdvisor
                     variance += hw * dk * dk;
                 }
         }
-        if (den > 0) return (num / den, true, Math.Sqrt(variance) / den);
+        if (den > 0) return (num / den, true, Math.Sqrt(variance) / den, false);
+
+        // Measured on this oven before: the profile's gains for the modes here (their mean, when they share one adjustment).
+        if (options.KnownGains is { } known && points.Select(p => p.Mode).Distinct().Where(known.ContainsKey).ToList() is { Count: > 0 } modes)
+            return (modes.Average(m => known[m]), false, null, true);
 
         if (options.Model == AdjustModel.Gain)
         {
             var fit = Stats.Fit(points.Select(p => p.SetpointC).ToList(), points.Select(p => p.SetpointC + p.OffsetC).ToList());
-            if (fit is { Slope: > 0.5 and < 1.5 }) return (fit.Slope, false, null);
+            if (fit is { Slope: > 0.5 and < 1.5 }) return (fit.Slope, false, null, false);
         }
-        return (1, false, null);
+        return (1, false, null, false);
     }
 
     /// <summary>The change that best meets the objective, on the oven's steps.</summary>

@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using OvenTracker.Analysis;
 using OvenTracker.Meter;
+using OvenTracker.Ovens;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -9,6 +10,10 @@ namespace OvenTracker.Commands;
 /// <summary>The options shared by <c>run</c> and <c>analyze</c>: the oven's thermostat adjustment, and the probe.</summary>
 public abstract class SharedSettings : CommandSettings
 {
+    [CommandOption("--oven <KEY>")]
+    [Description("The oven, so the app knows its adjustment's steps and range, how to read and change it, its convection conversion and how slowly it cycles: generic, ge-phs925, or one described in a file (oventracker ovens lists them). Remembered.")]
+    public string? Oven { get; set; }
+
     [CommandOption("--probe <NAME>")]
     [Description("The probe in use, so the report uses its tolerance and range: type-k (standard limits, the default for a type K meter), type-k-special, or 80bk-a (Fluke 80BK-A).")]
     public string? Probe { get; set; }
@@ -70,6 +75,7 @@ public abstract class SharedSettings : CommandSettings
         if (AdjustStep is <= 0) return ValidationResult.Error("--adjust-step must be positive.");
         if (AdjustRange is <= 0) return ValidationResult.Error("--adjust-range must be positive.");
         if (Favour is <= 0) return ValidationResult.Error("--favour must be a temperature, e.g. 350.");
+        if (Oven is not null && OvenProfiles.Find(Oven) is null) return ValidationResult.Error($"--oven must be one of: {OvenProfiles.Keys()}. To add yours, see docs/adding-an-oven.md.");
         if (Probe is not null && Probes.Find(Probe) is null) return ValidationResult.Error($"--probe must be one of: {Probes.Keys}. For another, give --probe-tolerance (and --probe-max).");
         if (ProbeTolerance is not null && Probes.ParseTolerance(ProbeTolerance, TempUnit.Celsius) is null)
             return ValidationResult.Error("--probe-tolerance must look like 2.2C,2% (the greater of ±2.2 °C and ±2 %) or 0.3C+0.5% (the two added).");
@@ -78,10 +84,13 @@ public abstract class SharedSettings : CommandSettings
     }
 
     /// <summary>The adjustment options: the ones given here, over <paramref name="saved"/> (from a run), over the defaults for the unit.</summary>
-    public AdjustmentOptions BuildOptions(TempUnit unit, AdjustmentOptions? saved = null)
+    /// <param name="oven">The oven: its step, range, sharing and measured gains are the defaults when nothing is saved.</param>
+    public AdjustmentOptions BuildOptions(TempUnit unit, AdjustmentOptions? saved = null, OvenProfile? oven = null)
     {
         var f = new UnitFormatter(unit);
-        var o = saved ?? AdjustmentOptions.For(unit);
+        var o = saved ?? AdjustmentOptions.For(oven ?? OvenProfiles.Default, unit);
+        // A newly chosen oven brings its own measured gains, even to options saved with a run.
+        if (saved is not null && Oven is not null && oven is not null) o = o with { KnownGains = AdjustmentOptions.For(oven, unit).KnownGains };
         if (AdjustStep is { } step) o = o with { StepC = f.DeltaFromDisplay(step) };
         if (AdjustRange is { } range) o = o with { RangeC = f.DeltaFromDisplay(range) };
         if (ParseObjective(Objective) is { } objective) o = o with { Objective = objective, FavourC = Favour is null ? null : o.FavourC };
