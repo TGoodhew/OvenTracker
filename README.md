@@ -1,8 +1,10 @@
 # OvenTracker
 
+[![CI](https://github.com/TGoodhew/OvenTracker/actions/workflows/ci.yml/badge.svg)](https://github.com/TGoodhew/OvenTracker/actions/workflows/ci.yml)
+
 Checks how accurate an oven's temperature setting really is, in **bake** and **convection**, using a
 Keysight (Agilent) **U1253B** multimeter with a type K thermocouple, read over Bluetooth through a
-**U1177A** IR-to-Bluetooth adapter. A .NET 11 console app with a live
+**U1177A** IR-to-Bluetooth adapter. A .NET 11 console app for **Windows and Linux**, with a live
 [Spectre.Console](https://spectreconsole.net) display.
 
 For each setpoint it works out by itself when the oven has settled and how long it has to keep
@@ -17,12 +19,45 @@ thermostat swings, and how bake and convection differ.
 
 - U1253B with a type K thermocouple in the temperature input, dial on temperature (°C or °F; the app
   reads whichever the meter shows).
-- U1177A clipped to the meter's IR port, switched on and paired in Windows Bluetooth settings. Pairing
-  adds two "Standard Serial over Bluetooth link" COM ports. The app uses the **outgoing** one (the one
-  with the adapter's address) and finds it by itself.
-- The .NET 11 runtime (or build with `-SelfContained`).
+- U1177A clipped to the meter's IR port, switched on and paired with the computer:
+  - **Windows:** pair it in Bluetooth settings. Pairing adds two "Standard Serial over Bluetooth link" COM
+    ports. The app uses the **outgoing** one (the one with the adapter's address) and finds it by itself.
+  - **Linux:** pair it and bind it to `/dev/rfcomm0` (see [Linux](#linux)). The app finds RFCOMM devices by
+    itself.
+- OvenTracker from the [Releases](https://github.com/TGoodhew/OvenTracker/releases) page. The
+  *self-contained* packages need nothing else; the others need the
+  [.NET 11 runtime](https://dotnet.microsoft.com/download).
+
+## Linux
+
+OvenTracker runs on Linux on x64 and 64-bit ARM (a Raspberry Pi 4 or 5 makes a handy oven-side logger).
+Unpack the package and run it from a terminal:
+
+```sh
+mkdir ~/oventracker && tar -xzf OvenTracker-*-linux-x64-self-contained.tar.gz -C ~/oventracker
+~/oventracker/OvenTracker
+```
+
+The U1177A is a Bluetooth serial (SPP) device. Pair it once, then bind it to a serial device:
+
+```sh
+bluetoothctl                      # then: scan on, pair <address>, trust <address>, quit
+sudo rfcomm bind 0 <address>      # makes /dev/rfcomm0 (rfcomm is in the bluez package; some
+                                  # distributions put it in bluez-deprecated-tools)
+sudo usermod -aG dialout $USER    # serial devices belong to the dialout group; log in again after
+```
+
+The binding doesn't survive a restart, so run `rfcomm bind` again after one. A U1173 IR-USB cable shows up
+as `/dev/ttyUSB0` instead; give it with `--resource /dev/ttyUSB0`. `OvenTracker meters` lists the serial
+devices it can see.
+
+On Linux, runs are saved to `~/Documents/OvenTracker` (or `~/OvenTracker` if there is no `~/Documents`).
+The app remembers the last meter in `~/.config/OvenTracker`.
 
 ## Use
+
+On Linux, the program is `./OvenTracker`, and the resource is a device such as `/dev/rfcomm0`.
+
 
 ```powershell
 OvenTracker.exe                       # asks for the unit, modes and setpoints, then guides you
@@ -79,7 +114,8 @@ At the end, the app shows the results for every setpoint and what it found:
 
 ![The results at the end of a run: the accuracy of each setpoint, how the oven got there, bake against convection, and the findings](docs/images/results.png)
 
-Each run saves to `Documents\OvenTracker\<date time>\` (or `--out`):
+Each run saves to `Documents\OvenTracker\<date time>\` (on Linux, `~/Documents/OvenTracker/<date time>/`),
+or to `--out`:
 
 - `report.md`: findings, a table per setpoint, bake against convection, preheat signal accuracy, how
   long each setpoint needed, and how far to trust it.
@@ -101,7 +137,7 @@ Each kind of meter has a driver in `src/OvenTracker/Meter`. Two come with the ap
 
 | `--meter` | What it is | `--resource` |
 | --- | --- | --- |
-| `u1253b` (the default) | A Keysight U1253B (or another U1250-series meter) through a U1177A Bluetooth adapter or a U1173 cable | A serial port, e.g. `COM5`. Left out, the app tries the port that worked last time, then each outgoing Bluetooth port. |
+| `u1253b` (the default) | A Keysight U1253B (or another U1250-series meter) through a U1177A Bluetooth adapter or a U1173 cable | A serial port: `COM5` on Windows, `/dev/rfcomm0` on Linux. Left out, the app tries the port that worked last time, then each Bluetooth link. |
 | `simulated` | A made-up oven and meter. `--simulate` is short for `--meter simulated`. | Not used. |
 
 Without `--meter` the app uses the meter that answered last time, or the U1253B. `oventracker meters` lists what
@@ -135,17 +171,31 @@ reconnects and carries on.
 
 ## Build
 
+One codebase builds for every system. `build.ps1` needs PowerShell 7 and runs on Windows or Linux:
+
 ```powershell
-./build.ps1 -SignScript C:\path\to\Sign-Files.ps1   # test, publish, sign, zip
-./build.ps1 -SelfContained                           # unsigned, includes the .NET runtime
+./build.ps1 -SignScript C:\path\to\Sign-Files.ps1         # Windows: test, publish, sign, zip
+./build.ps1 -SelfContained                                # this system, with the .NET runtime included
+./build.ps1 -Runtime linux-x64,linux-arm64 -SkipTests     # Linux packages (build them on Linux)
 ```
 
-`build.ps1` runs the tests, publishes for win-x64 into `artifacts\publish` and zips it into
-`artifacts\OvenTracker-<version>-win-x64.zip`. Given a signing script (`-SignScript`, or the
-`OVENTRACKER_SIGN_SCRIPT` environment variable), it Authenticode-signs OvenTracker's own `OvenTracker.exe`
-and `OvenTracker.dll` with Azure Artifact Signing before zipping. It then fails unless both are validly
-signed. Other publishers' DLLs are left alone. The signing account and tools stay outside the repository.
-Without a script the build still works, unsigned, with a warning.
+`build.ps1` runs the tests, then publishes each runtime (by default the one you're on) into
+`artifacts/publish/<runtime>`. It packs Windows into `artifacts/OvenTracker-<version>-win-x64.zip`, and
+Linux into `.tar.gz`, which keeps the program's executable bit. For Windows, given a signing script
+(`-SignScript`, or the `OVENTRACKER_SIGN_SCRIPT` environment variable), it Authenticode-signs OvenTracker's
+own `OvenTracker.exe` and `OvenTracker.dll` with Azure Artifact Signing before packing, then fails unless
+both are validly signed. Other publishers' DLLs are left alone. The signing account and tools stay outside
+the repository. Without a script the build still works, unsigned, with a warning.
+
+The code is the same on both systems. What differs is kept behind `OperatingSystem` checks: finding serial
+ports (WMI on Windows; `/dev` and sysfs on Linux), how port names compare, and where runs and settings are
+saved.
+
+**CI** ([ci.yml](.github/workflows/ci.yml)) builds and tests on Windows and Linux for every push and pull
+request. On Linux it also publishes the app and runs a whole simulated session in a terminal.
+**Releases** ([release.yml](.github/workflows/release.yml)) build each package on its own system (Windows,
+Linux x64 and Linux ARM64), sign the Windows programs, and publish them with a `SHA256SUMS` file.
+[docs/releasing.md](docs/releasing.md) explains how to make a release and how signing is set up.
 
 ## License
 

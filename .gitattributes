@@ -1,0 +1,23 @@
+# Line endings: the repository stores LF, and each checkout uses its own system's endings.
+* text=auto
+
+# Must stay LF everywhere: shell scripts run on Linux, and CRLF breaks them.
+*.sh text eol=lf
+
+# Source and project files, so diffs and merges treat them as text.
+*.cs text diff=csharp
+*.csproj text
+*.slnx text
+*.props text
+*.targets text
+*.json text
+*.yml text
+*.md text
+*.ps1 text
+
+# Binary: never converted.
+*.png binary
+*.jpg binary
+*.ico binary
+*.zip binary
+*.gz binary

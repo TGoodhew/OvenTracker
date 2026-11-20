@@ -73,7 +73,7 @@ public sealed class RunSettings : CommandSettings
     public double Interval { get; set; } = 1;
 
     [CommandOption("-o|--out <DIR>")]
-    [Description("Folder for the readings and report. Default: Documents\\OvenTracker\\<date time>.")]
+    [Description("Folder for the readings and report. Default: OvenTracker/<date time> in your Documents folder (on Linux, ~/Documents, or ~ if there is none).")]
     public string? Out { get; set; }
 
     [CommandOption("-y|--yes")]
@@ -250,7 +250,7 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
 
         if (!s.Yes && !await new ConfirmationPrompt("Ready to start?").ShowAsync(AnsiConsole.Console, ct)) return 0;
 
-        var outDir = s.Out ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "OvenTracker", DateTime.Now.ToString("yyyy-MM-dd HHmm", Inv));
+        var outDir = s.Out ?? Path.Combine(RunsFolder(), DateTime.Now.ToString("yyyy-MM-dd HHmm", Inv));
         var info = new SessionInfo(Version, DateTimeOffset.Now, $"{identity.Manufacturer} {identity.Model}", meter.Location, unit, toleranceC, options, plan,
             driver.Name, identity, config?.Sensor);
         using var recorder = new RunRecorder(outDir, info);
@@ -303,6 +303,22 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
         AnsiConsole.MarkupLine($"Saved to [link]{Markup.Escape(outDir)}[/]: report.md, results.json and readings.csv.");
         AnsiConsole.MarkupLine("[grey]Turn the oven off.[/]");
         return 0;
+    }
+
+    /// <summary>
+    /// Where runs are saved by default: Documents\OvenTracker on Windows; on Linux and macOS,
+    /// ~/Documents/OvenTracker, or ~/OvenTracker where there is no Documents folder.
+    /// </summary>
+    public static string RunsFolder()
+    {
+        var docs = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        if (!OperatingSystem.IsWindows())
+        {
+            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            var standard = Path.Combine(home, "Documents");
+            docs = Directory.Exists(standard) ? standard : string.IsNullOrEmpty(docs) ? home : docs;
+        }
+        return Path.Combine(docs, "OvenTracker");
     }
 
     /// <summary>The driver to use: the one asked for, or the one that answered last time, or the default.</summary>

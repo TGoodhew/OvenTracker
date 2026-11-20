@@ -1,0 +1,58 @@
+name: CI
+
+# Builds and tests on Windows and Linux for every push to main and every pull request, so a change that
+# works on one system and breaks the other is caught before it is merged. On Linux it also publishes the
+# app and runs a whole simulated session in a terminal, as a person would.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: Build and test (${{ matrix.os }})
+    strategy:
+      fail-fast: false # a failure on one system shouldn't hide the result on the other
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET (the SDK in global.json)
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Build
+        run: dotnet build OvenTracker.slnx -c Release
+
+      - name: Test
+        run: dotnet test OvenTracker.slnx -c Release --no-build --logger "console;verbosity=normal"
+
+      - name: Publish and try it (Linux)
+        if: runner.os == 'Linux'
+        shell: pwsh
+        run: |
+          ./build.ps1 -Runtime linux-x64 -SkipTests
+          $app = './artifacts/publish/linux-x64/OvenTracker'
+          & $app --version
+          if ($LASTEXITCODE -ne 0) { throw "--version failed ($LASTEXITCODE)" }
+          & $app meters
+          if ($LASTEXITCODE -ne 0) { throw "meters failed ($LASTEXITCODE)" }
+          # The live display needs a terminal: script gives it one.
+          script -qec "$app run --simulate --speed 3000 -y --unit F --modes bake,convection --setpoints 350 --out run" /dev/null
+          if ($LASTEXITCODE -ne 0) { throw "the simulated session failed ($LASTEXITCODE)" }
+          foreach ($f in 'report.md', 'results.json', 'readings.csv', 'session.json') {
+            if (-not (Test-Path "run/$f")) { throw "the simulated session wrote no $f" }
+          }
+          Get-Content run/report.md -TotalCount 12
