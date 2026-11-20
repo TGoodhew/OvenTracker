@@ -109,10 +109,12 @@ These steps are from the owner's manual, *Adjust the oven thermostat—Do it you
    display shows **SF** (Special Features).
 2. Touch **BAKE**. The display shows a number: the adjustment that is set now. **Write it down.** It is
    `0` if the oven has never been adjusted.
-3. Touch **BAKE** again to switch between *increasing* (hotter) and *decreasing* (cooler). Choose cooler
-   if the oven runs hot, and hotter if it runs cold. Check which one the display shows before going on.
+3. Touch **BAKE** again to switch the sign between positive (hotter) and negative (cooler). If the oven
+   runs hot, you want negative; if it runs cold, positive. So the display should match the suggested
+   setting in the report: −10 °F means the display shows a negative number.
 4. Type the amount on the number pads, the way you would read it. For 10 °F, touch **1** then **0**. The
-   range is up to 35 °F hotter or 35 °F cooler, in 1 °F steps.
+   range is up to 35 °F hotter or 35 °F cooler, in 1 °F steps. Check that the display shows the
+   right sign before going on.
 5. Touch **START**. The display goes back to the time of day. Use the oven as normal.
 
 According to the manual:
@@ -137,14 +139,15 @@ correction it suggests is a change to make, not the final number to enter:
 
 > new adjustment = current adjustment + the report's suggested correction
 
-Counting hotter as + and cooler as −:
+The oven shows the adjustment as a signed number, positive for hotter and negative for cooler, so this
+is plain arithmetic on what the display shows:
 
-| Currently set | Report says | Enter |
+| Display shows now | Report says | Set the display to |
 | --- | --- | --- |
-| 0 | runs 10 °F hot, set about −10 °F | 10, cooler |
-| 5 cooler (−5) | runs 10 °F hot, set about −10 °F | 15, cooler (−5 − 10 = −15) |
-| 10 hotter (+10) | runs 4 °F hot, set about −4 °F | 6, hotter (+10 − 4 = +6) |
-| 15 cooler (−15) | runs 6 °F cold, set about +6 °F | 9, cooler (−15 + 6 = −9) |
+| 0 | runs 10 °F hot, set about −10 °F | −10 |
+| −5 | runs 10 °F hot, set about −10 °F | −15 (−5 − 10) |
+| +10 | runs 4 °F hot, set about −4 °F | +6 (+10 − 4) |
+| −15 | runs 6 °F cold, set about +6 °F | −9 (−15 + 6) |
 
 That is why step 2 says to write the current number down. It is also the reason to re-run the tracker
 after every adjustment, rather than adjusting twice from the same report.
@@ -206,5 +209,6 @@ oven's offset adjustment would correct it. … setting it to about −11 °F wou
   11 °F hot, well beyond the probe's ±4 °F, so it is a real error and worth correcting.
 - The 28 to 34 °F swing is the thermostat cycling. Ignore it.
 - The error is the same at every setting, so one adjustment fixes all of them.
-- The oven was at 0, so: **SF**, **BAKE**, choose cooler, **1 1**, **START**.
+- The oven was at 0, so: **SF**, **BAKE**, **BAKE** again until the sign is negative, **1 1**, check the
+  display reads −11, **START**.
 - Re-run at 350 °F. The Offset should now be about 0 °F.
