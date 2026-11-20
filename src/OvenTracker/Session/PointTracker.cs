@@ -20,8 +20,11 @@ public sealed class PointTracker(
     bool fast,
     AutoPowerOff? autoPowerOff = null)
 {
-    public async Task<(PointResult Result, PointOutcome Outcome)> RunAsync(TestPoint point, CancellationToken ct)
+    /// <param name="startingFromC">Where the oven was before this setpoint, so the app can check it heads for the new setting.</param>
+    /// <param name="swingC">The thermostat's swing at the setpoint before, if measured.</param>
+    public async Task<(PointResult Result, PointOutcome Outcome)> RunAsync(TestPoint point, CancellationToken ct, double? startingFromC = null, double? swingC = null)
     {
+        var heading = startingFromC is { } from ? new HeadingCheck(from, point.SetpointC, swingC) : null;
         var analyzer = new SetpointAnalyzer(point.SetpointC, options);
         DateTimeOffset? start = null;
         var started = false;
@@ -62,7 +65,27 @@ public sealed class PointTracker(
                         var elapsed = (r.Time - start.Value).TotalSeconds;
                         recorder.Reading(r, point, elapsed);
                         lastStatus = r.Status;
-                        if (r is { Status: ReadingStatus.Ok, Celsius: { } c }) analyzer.Add(elapsed, c);
+                        if (r is { Status: ReadingStatus.Ok, Celsius: { } c })
+                        {
+                            analyzer.Add(elapsed, c);
+                            // Is the oven heading for the new setting? If not, it probably wasn't changed.
+                            if (heading is not null)
+                            {
+                                var was = heading.State;
+                                var now = heading.Update(elapsed, c);
+                                if (now == HeadingState.NotHeading && was != HeadingState.NotHeading)
+                                {
+                                    recorder.Event(r.Time, point, elapsed, "not-heading");
+                                    poller.Enqueue(m => m.Beep());
+                                    Console.Write("\a");
+                                }
+                                else if (now == HeadingState.OnItsWay && was == HeadingState.NotHeading)
+                                {
+                                    recorder.Event(r.Time, point, elapsed, "heading");
+                                    notice = "The oven is heading for the setting now.";
+                                }
+                            }
+                        }
                         if (analyzer.Phase == PointPhase.Complete) break;
                     }
 
@@ -78,7 +101,8 @@ public sealed class PointTracker(
                             notice = "The meter is answering again; tracking carries on.";
                             break;
                     }
-                    alert = silence.Silent ? SilenceWatch.Message(poller.SilentFor, autoPowerOff) : null;
+                    alert = silence.Silent ? SilenceWatch.Message(poller.SilentFor, autoPowerOff)
+                        : heading is { State: HeadingState.NotHeading } h ? NotHeadingMessage(h, format) : null;
 
                     if (ct.IsCancellationRequested)
                     {
@@ -126,6 +150,8 @@ public sealed class PointTracker(
                             case 'R':
                                 recorder.Event(lastTime, point, analyzer.Now, "restart");
                                 analyzer = new SetpointAnalyzer(point.SetpointC, options);
+                                // Check again from where the oven is now (e.g. after changing the setting).
+                                if (heading is not null) heading = new HeadingCheck(poller.LastCelsius ?? heading.FromC, point.SetpointC, swingC);
                                 start = null;
                                 notice = "Restarted: close the door and leave it; the clock starts again from the next reading.";
                                 break;
@@ -143,6 +169,11 @@ public sealed class PointTracker(
         recorder.Event(lastTime, point, analyzer.Now, $"end:{analyzer.Reason}");
         return (new PointResult(point, analyzer.Metrics()), outcome);
     }
+
+    /// <summary>What to say when the oven isn't heading for its new setting.</summary>
+    public static string NotHeadingMessage(HeadingCheck h, UnitFormatter f) =>
+        $"The oven isn't {(h.Heating ? "heating up" : "cooling down")} towards {f.Setpoint(h.SetpointC)}: it's still near {f.T(h.FromC, 0)}. " +
+        "Did you change the setting? If not, change it now and press R twice to restart this setpoint.";
 
     delegate Spectre.Console.Rendering.IRenderable IRenderableFactory();
 
