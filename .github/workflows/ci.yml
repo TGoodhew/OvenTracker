@@ -56,6 +56,8 @@ jobs:
           foreach ($f in 'report.md', 'results.json', 'readings.csv', 'session.json') {
             if (-not (Test-Path "run/$f")) { Get-Content run.log; throw "the simulated session wrote no $f" }
           }
-          if (Select-String -Path run.log -Pattern "`e\[" -Quiet) { throw "the log has terminal control codes in it" }
+          # Colours are fine in a log (Spectre colours CI output); cursor movement, screen clearing and redraws
+          # (escape sequences ending in anything but "m") are what broke it.
+          if (Select-String -Path run.log -Pattern "`e\[[0-9;?]*[A-Za-ln-z]" -CaseSensitive -Quiet) { throw "the log has cursor or screen control codes in it" }
           Get-Content run.log | Select-Object -Last 15
           Get-Content run/report.md -TotalCount 12
