@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Reflection;
 using OvenTracker.Analysis;
 using OvenTracker.Meter;
+using OvenTracker.Ovens;
 using OvenTracker.Session;
 using OvenTracker.Ui;
 using Spectre.Console;
@@ -63,9 +64,8 @@ public sealed class RunSettings : SharedSettings
     public int MinCycles { get; set; } = 4;
 
     [CommandOption("--max-minutes <MIN>")]
-    [Description("Longest to spend at one setpoint.")]
-    [DefaultValue(120.0)]
-    public double MaxMinutes { get; set; } = 120;
+    [Description("Longest to spend at one setpoint. Default 120, or longer for an oven known to cycle slowly (an hour plus six cycles: 180 for the GE PHS925).")]
+    public double? MaxMinutes { get; set; }
 
     [CommandOption("--interval <SEC>")]
     [Description("Seconds between readings.")]
@@ -171,6 +171,9 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
     {
         var ct = cancellationToken;
         var appSettings = AppSettings.Load();
+        // The oven: the one asked for, the saved run's, the one used last time, or the generic one.
+        var resumedOven = s.Resume is { } r0 ? AnalyzeCommand.Load(r0)?.Info.Oven : null;
+        var ovenProfile = OvenProfiles.Find(s.Oven) ?? resumedOven ?? OvenProfiles.Find(appSettings.LastOven) ?? OvenProfiles.Default;
         var driver = ChooseDriver(s, appSettings);
         var resource = s.Resource ?? s.Port;
         AnsiConsole.Write(new FigletText("OvenTracker").Color(Color.Orange1));
@@ -281,7 +284,7 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
 
             var precisionC = s.Precision is { } p ? fu.DeltaFromDisplay(p) : unit == TempUnit.Fahrenheit ? 2 / 1.8 : 1.0;
             toleranceC = s.Tolerance is { } t ? fu.DeltaFromDisplay(t) : unit == TempUnit.Fahrenheit ? 15 / 1.8 : 8.0;
-            options = new AnalysisOptions { PrecisionC = precisionC, MinCycles = s.MinCycles, MaxPointMinutes = s.MaxMinutes };
+            options = new AnalysisOptions { PrecisionC = precisionC, MinCycles = s.MinCycles, MaxPointMinutes = s.MaxMinutes ?? ovenProfile.DefaultMaxMinutes };
             plan = BuildPlan(modes, setpoints.Select(fu.FromDisplay).ToList(), s.Grouped);
         }
         var f = new UnitFormatter(unit);
@@ -290,6 +293,8 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
         var adjustmentC = s.AdjustmentC(unit) ?? resumed?.Info.AdjustmentC;
         if (adjustmentC is null && !driver.IsSimulation && !s.Yes && interactive)
         {
+            if (!ovenProfile.IsGeneric && ovenProfile.HowToRead is { Count: > 0 } read)
+                AnsiConsole.MarkupLine($"[grey]To see it on the {Markup.Escape(ovenProfile.Name)}: {Markup.Escape(string.Join(" ", read.Select((step, i) => $"{i + 1}. {step}")))}[/]");
             var answer = await new TextPrompt<string>($"What is the oven's thermostat adjustment set to now, in {f.Symbol}? [grey](0 if it has never been changed; Enter if you don't know)[/]")
                 .AllowEmpty()
                 .Validate(t => t.Trim().Length == 0 || double.TryParse(t, System.Globalization.NumberStyles.Float, Inv, out _)
@@ -329,7 +334,7 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
                 "• Check the thermocouple's insulation is rated for your highest setpoint.\n" +
                 "• Leave the door shut while a setpoint is being measured. If it gets opened, press [bold]R[/] twice to restart that setpoint.\n" +
                 "• When the oven beeps or shows it is preheated, press [bold]P[/]: the report shows how true that signal was.\n" +
-                (modes.Contains(OvenMode.Convection) ? "• If your oven lowers convection temperatures automatically (e.g. by 25 °F), turn that off, or enter the temperature it actually targets.\n" : "") +
+                (modes.Contains(OvenMode.Convection) ? ConvectionNote(ovenProfile, f) : "") +
                 "\n[bold]How long it takes[/]\n" +
                 $"The app finds when the oven has settled, then measures whole thermostat cycles until the mean is known to ±{Markup.Escape(f.Span(options.PrecisionC))} (at least {options.MinCycles} cycles). " +
                 "It learns your oven's cycle as it goes and shows the time left. As a rough guide, the first setpoint from cold takes about an hour and each one after it 20–45 min.")).
@@ -383,7 +388,8 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
             info = resumed.Info with
             {
                 AdjustmentC = adjustmentC,
-                Adjust = s.BuildOptions(unit, resumed.Info.Adjust),
+                Adjust = s.BuildOptions(unit, resumed.Info.Adjust, ovenProfile),
+                Oven = ovenProfile,
                 AmbientC = ambientC,
                 Sensor = sensor,
                 Sittings = [.. resumed.Info.Sittings ?? [resumed.Info.Started], startedAt],
@@ -393,7 +399,12 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
         {
             outDir = s.Out ?? Path.Combine(RunsFolder(), DateTime.Now.ToString("yyyy-MM-dd HHmm", Inv));
             info = new SessionInfo(Version, startedAt, $"{identity.Manufacturer} {identity.Model}", meter.Location, unit, toleranceC, options, plan,
-                driver.Name, identity, sensor, adjustmentC, s.BuildOptions(unit), ambientC, [startedAt]);
+                driver.Name, identity, sensor, adjustmentC, s.BuildOptions(unit, null, ovenProfile), ambientC, [startedAt], ovenProfile);
+        }
+        if (!driver.IsSimulation)
+        {
+            appSettings.LastOven = ovenProfile.Key;
+            appSettings.Save();
         }
         using var recorder = new RunRecorder(outDir, info, append: resumed is not null);
         if (resumed is not null) recorder.Note(DateTimeOffset.UtcNow, "resume");
@@ -610,6 +621,19 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
         if (near.Count > 0)
             lines.Add($"At {Markup.Escape(string.Join(", ", near.Select(f.Setpoint)))}, the oven's first peak and thermostat swing (about {Markup.Escape(f.Span(PeakAboveSetpointC, 0))}) may take the probe past it. The app will say if a reading does.");
         return (string.Join("\n", lines), over.Count > 0);
+    }
+
+    /// <summary>The "Before you start" line about convection conversion: the oven's own, with how to turn it off, or a general one.</summary>
+    public static string ConvectionNote(OvenProfile oven, UnitFormatter f)
+    {
+        if (oven.ConvectionConversionC is { } conversion)
+        {
+            var off = oven.HowToTurnOffConversion is { Count: > 0 } steps
+                ? $" To turn it off: {string.Join(" ", steps.Select((step, i) => $"{i + 1}. {step}"))}"
+                : "";
+            return $"• The {Markup.Escape(oven.Name)} lowers convection settings by about {Markup.Escape(f.Span(conversion, 0))} by itself. Turn that off for the test, or enter the temperature it actually targets.{Markup.Escape(off)}\n";
+        }
+        return "• If your oven lowers convection temperatures automatically (e.g. by 25 °F), turn that off, or enter the temperature it actually targets.\n";
     }
 
     /// <summary>Room temperature to assume when it wasn't measured or given: 70 °F.</summary>

@@ -24,6 +24,10 @@ thermostat swings, and how bake and convection differ.
   any probe's datasheet. Without it, the report assumes a standard-grade type K (±2.2 °C or 0.75 %).
   `analyze --probe …` applies it to runs already made. The probe's insulation must be rated for your highest
   setpoint, and the app warns if a setpoint could take the probe past its rating.
+- **Your oven, if the app knows it:** `--oven ge-phs925` for the GE Profile PHS925ST1SS. An oven profile gives
+  the app the adjustment's steps and range, how to read and change it, any convection conversion, and how
+  slowly the thermostat cycles. Without one, the app assumes a typical oven. Describe your own oven in a small
+  JSON file ([Describing your oven](docs/adding-an-oven.md)). `OvenTracker ovens` lists them.
 - **The meter's auto power-off turned off.** The U1253B switches itself off after 10 minutes by default,
   and reading it over Bluetooth doesn't keep it on, so it would switch off in the middle of every setpoint.
   To turn it off: hold the button that steps through the functions at the dial's position (button 4 in the

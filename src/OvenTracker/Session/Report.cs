@@ -114,7 +114,7 @@ public sealed class Report(SessionInfo info, IReadOnlyList<PointResult> results)
         }
     }
 
-    public AdjustmentOptions AdjustOptions => info.Adjust ?? AdjustmentOptions.For(info.Unit);
+    public AdjustmentOptions AdjustOptions => info.Adjust ?? AdjustmentOptions.For(info.Oven ?? Ovens.OvenProfiles.Default, info.Unit);
 
     /// <summary>Each measured setpoint, with the adjustment the oven had for it.</summary>
     public IReadOnlyList<AdjustPoint> AdjustPoints() =>
@@ -167,6 +167,10 @@ public sealed class Report(SessionInfo info, IReadOnlyList<PointResult> results)
             yield return "The run didn't record the oven's current adjustment. Give it with --adjustment and the app will say what to set it to.";
         if (a.Curved)
             yield return "The error bends with temperature rather than following a straight line, so where it matters, use the table of what to set.";
+        if (a.GainFromProfile)
+            yield return $"Using the gain measured on this oven before (its profile, from characterise): each degree of adjustment moves it {a.Gain.ToString("F2", Inv)} degrees.";
+        if (Math.Abs(f.DeltaToDisplay(a.ChangeC)) >= 0.5 && info.Oven is { IsGeneric: false, HowToChange: { Count: > 0 } change } oven)
+            yield return $"To set it on the {oven.Name}: {string.Join(" ", change.Select((step, i) => $"{i + 1}. {step}"))}";
         if (a.TooFewSetpoints is { } why)
             yield return $"{why} Worth adding: {string.Join(", ", a.AddSetpointsC.Select(RoundedSetpoint))}.";
     }

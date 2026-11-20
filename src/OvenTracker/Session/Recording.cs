@@ -15,6 +15,7 @@ namespace OvenTracker.Session;
 /// <param name="Adjust">How to work out the best adjustment: the oven's steps and range, and the objective.</param>
 /// <param name="AmbientC">Room temperature: the probe's first reading, when the oven was cold, or as given.</param>
 /// <param name="Sittings">When each sitting started: the first, then each resume.</param>
+/// <param name="Oven">The oven's profile, as it was for this run.</param>
 public sealed record SessionInfo(
     string AppVersion,
     DateTimeOffset Started,
@@ -30,7 +31,8 @@ public sealed record SessionInfo(
     double? AdjustmentC = null,
     AdjustmentOptions? Adjust = null,
     double? AmbientC = null,
-    IReadOnlyList<DateTimeOffset>? Sittings = null);
+    IReadOnlyList<DateTimeOffset>? Sittings = null,
+    Ovens.OvenProfile? Oven = null);
 
 public static class Json
 {

@@ -14,6 +14,9 @@ public sealed class AppSettings
     /// <summary>Settings saved before there were drivers only have this: the serial port of the one meter there was.</summary>
     public string? LastPort { get; set; }
 
+    /// <summary>The oven used last time (its profile's key).</summary>
+    public string? LastOven { get; set; }
+
     const string DriverBeforeDrivers = "u1253b";
 
     /// <summary>Where the given driver's meter was last time, if it was that driver.</summary>

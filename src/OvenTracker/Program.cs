@@ -24,6 +24,9 @@ app.Configure(config =>
         .WithExample("run", "--unit", "F", "--modes", "bake,convection", "--setpoints", "350,400,450")
         .WithExample("run", "--meter", "u1253b", "--resource", "COM5")
         .WithExample("run", "--simulate", "--speed", "120");
+    config.AddCommand<OvensCommand>("ovens")
+        .WithDescription("List the ovens the app knows (built in, and described in files), or show one in full.")
+        .WithExample("ovens", "--show", "ge-phs925");
     config.AddCommand<MetersCommand>("meters")
         .WithAlias("ports")
         .WithDescription("List the meters each kind of meter's driver can see, and which one answers.")
