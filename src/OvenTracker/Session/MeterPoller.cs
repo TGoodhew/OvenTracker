@@ -38,6 +38,9 @@ public sealed class MeterPoller : IDisposable
     public DateTimeOffset? LastErrorAt { get; private set; }
     public double? BatteryPercent { get; private set; }
     public MeterConfig? Config { get; private set; }
+
+    /// <summary>The latest good temperature, in °C.</summary>
+    public double? LastCelsius { get; private set; }
     public int Reconnects { get; private set; }
     public long ReadCount { get; private set; }
 
@@ -80,6 +83,7 @@ public sealed class MeterPoller : IDisposable
                 ReadCount++;
                 failures = 0;
                 if (r.Status != ReadingStatus.Error) Config = meter.LastConfig;
+                if (r is { Status: ReadingStatus.Ok, Celsius: { } c }) LastCelsius = c;
                 readings.Writer.TryWrite(r);
             }
             catch (Exception ex) when (!token.IsCancellationRequested)

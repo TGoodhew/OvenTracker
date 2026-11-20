@@ -76,6 +76,18 @@ public sealed class RunSettings : AdjustmentSettings
     [Description("Folder for the readings and report. Default: OvenTracker/<date time> in your Documents folder (on Linux, ~/Documents, or ~ if there is none).")]
     public string? Out { get; set; }
 
+    [CommandOption("--resume <FOLDER>")]
+    [Description("Carry on a run saved earlier: measure the setpoints it didn't finish, adding to the same folder and report. If the oven is still hot, the app waits for it to cool first.")]
+    public string? Resume { get; set; }
+
+    [CommandOption("--ambient <TEMP>")]
+    [Description("Room temperature, in the oven's unit. Normally the probe's first reading with the oven cold; give it if the oven is hot when you start.")]
+    public double? Ambient { get; set; }
+
+    [CommandOption("--sim-hot <TEMP>", IsHidden = true)]
+    [Description("With --simulate, start as if the oven had just been used at this temperature, in the oven's unit.")]
+    public double? SimHot { get; set; }
+
     [CommandOption("-y|--yes")]
     [Description("Don't ask: start at once and begin each setpoint straight away (mainly for --simulate).")]
     public bool Yes { get; set; }
@@ -94,6 +106,8 @@ public sealed class RunSettings : AdjustmentSettings
         if (Precision is <= 0) return ValidationResult.Error("--precision must be positive.");
         if (Tolerance is <= 0) return ValidationResult.Error("--tolerance must be positive.");
         if (Modes is not null && RunCommand.ParseModes(Modes) is null) return ValidationResult.Error("--modes must be bake, convection, or both.");
+        if (Resume is not null && (!Directory.Exists(Resume) || !File.Exists(Path.Combine(Resume, "session.json")) || !File.Exists(Path.Combine(Resume, "readings.csv"))))
+            return ValidationResult.Error($"--resume needs a run's folder, with session.json and readings.csv: {Resume}");
         if (Setpoints is not null && RunCommand.ParseNumbers(Setpoints) is null) return ValidationResult.Error("--setpoints must be numbers, e.g. 350,400,450.");
         return ValidationResult.Success();
     }
@@ -195,38 +209,61 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
             if (config is not null) about.Add($"Meter set to {Markup.Escape(config.Description)}");
             if (meter.ReadBatteryPercent() is { } b) about.Add($"battery {b.ToString("F0", Inv)} %");
             if (about.Count > 0) AnsiConsole.MarkupLine(string.Join(", ", about) + ".");
-            var first = meter.Read();
-            if (first.Status == ReadingStatus.Overload)
-                AnsiConsole.MarkupLine("[yellow]The meter reads OL: the probe isn't connected (or is broken).[/]");
-            else if (first.Celsius is { } c0)
-                AnsiConsole.MarkupLine($"The probe reads {c0.ToString("F1", Inv)} °C now.");
         }
         var oven = meter as IOvenSimulation;
+        var first = meter.Read();
+        if (first.Status == ReadingStatus.Overload)
+            AnsiConsole.MarkupLine("[yellow]The meter reads OL: the probe isn't connected (or is broken).[/]");
+        else if (first.Celsius is { } c0 && !driver.IsSimulation)
+            AnsiConsole.MarkupLine($"The probe reads {c0.ToString("F1", Inv)} °C now.");
         AnsiConsole.WriteLine();
 
-        // 2. What to test.
-        var unit = Temp.ParseUnit(s.Unit) ?? await new SelectionPrompt<TempUnit>()
-            .Title("What unit does your [orange1]oven[/] use?")
-            .AddChoices(TempUnit.Fahrenheit, TempUnit.Celsius)
-            .UseConverter(u => u == TempUnit.Fahrenheit ? "°F" : "°C")
-            .ShowAsync(AnsiConsole.Console, ct);
+        // 2. What to test: asked, or the saved run's when resuming.
+        var resumed = s.Resume is { } resumeFolder ? AnalyzeCommand.Load(resumeFolder) : null;
+        TempUnit unit;
+        IReadOnlyList<OvenMode> modes;
+        IReadOnlyList<TestPoint> plan;
+        AnalysisOptions options;
+        double toleranceC;
+        if (resumed is not null)
+        {
+            unit = resumed.Info.Unit;
+            plan = resumed.Info.Plan;
+            modes = plan.Select(p => p.Mode).Distinct().ToList();
+            options = resumed.Info.Options;
+            toleranceC = resumed.Info.ToleranceC;
+        }
+        else
+        {
+            unit = Temp.ParseUnit(s.Unit) ?? await new SelectionPrompt<TempUnit>()
+                .Title("What unit does your [orange1]oven[/] use?")
+                .AddChoices(TempUnit.Fahrenheit, TempUnit.Celsius)
+                .UseConverter(u => u == TempUnit.Fahrenheit ? "°F" : "°C")
+                .ShowAsync(AnsiConsole.Console, ct);
+            var fu = new UnitFormatter(unit);
+
+            modes = s.Modes is not null ? ParseModes(s.Modes)! : await new MultiSelectionPrompt<OvenMode>()
+                .Title("Which modes do you want to test?")
+                .AddChoices(OvenMode.Bake, OvenMode.Convection)
+                .Select(OvenMode.Bake).Select(OvenMode.Convection)
+                .UseConverter(Temp.ModeName)
+                .ShowAsync(AnsiConsole.Console, ct);
+
+            var defaultSetpoints = unit == TempUnit.Fahrenheit ? "350, 400, 450" : "175, 200, 230";
+            var setpoints = s.Setpoints is not null ? ParseNumbers(s.Setpoints)! : ParseNumbers(await new TextPrompt<string>($"Setpoints to test, in {fu.Symbol}?")
+                .DefaultValue(defaultSetpoints)
+                .Validate(t => ParseNumbers(t) is null ? ValidationResult.Error("Numbers separated by commas, please.") : ValidationResult.Success())
+                .ShowAsync(AnsiConsole.Console, ct))!;
+
+            var precisionC = s.Precision is { } p ? fu.DeltaFromDisplay(p) : unit == TempUnit.Fahrenheit ? 2 / 1.8 : 1.0;
+            toleranceC = s.Tolerance is { } t ? fu.DeltaFromDisplay(t) : unit == TempUnit.Fahrenheit ? 15 / 1.8 : 8.0;
+            options = new AnalysisOptions { PrecisionC = precisionC, MinCycles = s.MinCycles, MaxPointMinutes = s.MaxMinutes };
+            plan = BuildPlan(modes, setpoints.Select(fu.FromDisplay).ToList(), s.Grouped);
+        }
         var f = new UnitFormatter(unit);
 
-        var modes = s.Modes is not null ? ParseModes(s.Modes)! : await new MultiSelectionPrompt<OvenMode>()
-            .Title("Which modes do you want to test?")
-            .AddChoices(OvenMode.Bake, OvenMode.Convection)
-            .Select(OvenMode.Bake).Select(OvenMode.Convection)
-            .UseConverter(Temp.ModeName)
-            .ShowAsync(AnsiConsole.Console, ct);
-
-        var defaultSetpoints = unit == TempUnit.Fahrenheit ? "350, 400, 450" : "175, 200, 230";
-        var setpoints = s.Setpoints is not null ? ParseNumbers(s.Setpoints)! : ParseNumbers(await new TextPrompt<string>($"Setpoints to test, in {f.Symbol}?")
-            .DefaultValue(defaultSetpoints)
-            .Validate(t => ParseNumbers(t) is null ? ValidationResult.Error("Numbers separated by commas, please.") : ValidationResult.Success())
-            .ShowAsync(AnsiConsole.Console, ct))!;
-
         // The oven's thermostat adjustment now, so the report can say what to set it to.
-        var adjustmentC = s.AdjustmentC(unit);
+        var adjustmentC = s.AdjustmentC(unit) ?? resumed?.Info.AdjustmentC;
         if (adjustmentC is null && !driver.IsSimulation && !s.Yes)
         {
             var answer = await new TextPrompt<string>($"What is the oven's thermostat adjustment set to now, in {f.Symbol}? [grey](0 if it has never been changed; Enter if you don't know)[/]")
@@ -236,13 +273,23 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
                 .ShowAsync(AnsiConsole.Console, ct);
             if (double.TryParse(answer, System.Globalization.NumberStyles.Float, Inv, out var given)) adjustmentC = f.DeltaFromDisplay(given);
         }
-
         if (adjustmentC is { } simAdjust) oven?.SetAdjustment(simAdjust); // the simulated oven obeys --adjustment too
+        if (s.SimHot is { } simHot) oven?.PretendUsed(f.FromDisplay(simHot));
 
-        var precisionC = s.Precision is { } p ? f.DeltaFromDisplay(p) : unit == TempUnit.Fahrenheit ? 2 / 1.8 : 1.0;
-        var toleranceC = s.Tolerance is { } t ? f.DeltaFromDisplay(t) : unit == TempUnit.Fahrenheit ? 15 / 1.8 : 8.0;
-        var options = new AnalysisOptions { PrecisionC = precisionC, MinCycles = s.MinCycles, MaxPointMinutes = s.MaxMinutes };
-        var plan = BuildPlan(modes, setpoints.Select(f.FromDisplay).ToList(), s.Grouped);
+        // Room temperature, for knowing when the oven is cold again: given, saved, or the first reading if the oven was cold.
+        var ambientC = s.Ambient is { } amb ? f.FromDisplay(amb) : resumed?.Info.AmbientC ?? (first.Celsius is < 45 and > -10 ? first.Celsius : null);
+
+        // What's already done, when resuming: the setpoints that finished (by themselves or by choice).
+        var done = resumed is null ? [] : Replay.Analyze(resumed.Csv, options)
+            .Where(r => r.Metrics.Reason is CompletionReason.Converged or CompletionReason.TimedOut or CompletionReason.Manual)
+            .ToList();
+        var todo = plan.Where(p => done.All(d => d.Point.Index != p.Index)).ToList();
+        if (resumed is not null && todo.Count == 0)
+        {
+            AnsiConsole.MarkupLine($"[green]Every setpoint in {Markup.Escape(resumed.Folder)} is already done.[/] [bold]oventracker analyze[/] re-reads it.");
+            meter.Dispose();
+            return 0;
+        }
 
         // 3. Explain, then go.
         AnsiConsole.Write(new Panel(new Markup(
@@ -253,49 +300,104 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
                 "• When the oven beeps or shows it is preheated, press [bold]P[/]: the report shows how true that signal was.\n" +
                 (modes.Contains(OvenMode.Convection) ? "• If your oven lowers convection temperatures automatically (e.g. by 25 °F), turn that off, or enter the temperature it actually targets.\n" : "") +
                 "\n[bold]How long it takes[/]\n" +
-                $"The app finds when the oven has settled, then measures whole thermostat cycles until the mean is known to ±{Markup.Escape(f.Span(precisionC))} (at least {options.MinCycles} cycles). " +
+                $"The app finds when the oven has settled, then measures whole thermostat cycles until the mean is known to ±{Markup.Escape(f.Span(options.PrecisionC))} (at least {options.MinCycles} cycles). " +
                 "It learns your oven's cycle as it goes and shows the time left. As a rough guide, the first setpoint from cold takes about an hour and each one after it 20–45 min.")).
             Border(BoxBorder.Rounded).BorderColor(Color.Grey35));
 
+        if (resumed is not null)
+            AnsiConsole.MarkupLine($"[bold]Carrying on[/] {Markup.Escape(resumed.Folder)}: {plan.Count - todo.Count} of {plan.Count} setpoints done.");
         var planTable = new Table().Border(TableBorder.Rounded).BorderColor(Color.Grey35).AddColumn("#").AddColumn("Mode").AddColumn("Setting");
-        foreach (var tp in plan) planTable.AddRow(tp.Index.ToString(Inv), Temp.ModeName(tp.Mode), Markup.Escape(f.Setpoint(tp.SetpointC)));
+        if (resumed is not null) planTable.AddColumn("");
+        foreach (var tp in plan)
+        {
+            var row = new List<string> { tp.Index.ToString(Inv), Temp.ModeName(tp.Mode), Markup.Escape(f.Setpoint(tp.SetpointC)) };
+            if (resumed is not null) row.Add(todo.Contains(tp) ? "to do" : "[green]done[/]");
+            planTable.AddRow(row.ToArray());
+        }
         AnsiConsole.Write(planTable);
         if (!s.Grouped && modes.Count > 1)
             AnsiConsole.MarkupLine("[grey]The modes alternate at each setpoint, so the oven only ever heats up between them and bake and convection are compared under the same conditions.[/]");
 
         if (!s.Yes && !await new ConfirmationPrompt("Ready to start?").ShowAsync(AnsiConsole.Console, ct)) return 0;
 
-        var outDir = s.Out ?? Path.Combine(RunsFolder(), DateTime.Now.ToString("yyyy-MM-dd HHmm", Inv));
-        var info = new SessionInfo(Version, DateTimeOffset.Now, $"{identity.Manufacturer} {identity.Model}", meter.Location, unit, toleranceC, options, plan,
-            driver.Name, identity, config?.Sensor, adjustmentC, s.BuildOptions(unit));
-        using var recorder = new RunRecorder(outDir, info);
+        var startedAt = DateTimeOffset.Now;
+        string outDir;
+        SessionInfo info;
+        if (resumed is not null)
+        {
+            outDir = resumed.Folder;
+            info = resumed.Info with
+            {
+                AdjustmentC = adjustmentC,
+                Adjust = s.BuildOptions(unit, resumed.Info.Adjust),
+                AmbientC = ambientC,
+                Sittings = [.. resumed.Info.Sittings ?? [resumed.Info.Started], startedAt],
+            };
+        }
+        else
+        {
+            outDir = s.Out ?? Path.Combine(RunsFolder(), DateTime.Now.ToString("yyyy-MM-dd HHmm", Inv));
+            info = new SessionInfo(Version, startedAt, $"{identity.Manufacturer} {identity.Model}", meter.Location, unit, toleranceC, options, plan,
+                driver.Name, identity, config?.Sensor, adjustmentC, s.BuildOptions(unit), ambientC, [startedAt]);
+        }
+        using var recorder = new RunRecorder(outDir, info, append: resumed is not null);
+        if (resumed is not null) recorder.Note(DateTimeOffset.UtcNow, "resume");
         using var poller = new MeterPoller(meter, TimeSpan.FromSeconds(s.Interval), driver.IsSimulation ? s.Speed : 1, connected: true);
         poller.Start();
 
-        var results = new List<PointResult>();
+        var results = new List<PointResult>(done);
         var meterLabel = driver.IsSimulation ? "simulated meter" : $"{identity.Model} on {meter.Location}";
         var tracker = new PointTracker(poller, recorder, f, options, toleranceC, meterLabel, driver.NotTemperatureHelp, plan.Count, driver.IsSimulation);
+        var waiter = new ResetWaiter(poller, recorder, f, ambientC ?? AssumedAmbientC, ambientC is null, driver.IsSimulation);
+        var afterReset = resumed is not null; // the first setpoint of a resumed run follows a break
+        var stopped = false;
         try
         {
-            foreach (var point in plan)
+            for (var w = 0; w < 50 && poller.LastCelsius is null; w++) await Task.Delay(100, ct); // a first reading, to know how hot the oven is
+            foreach (var point in todo)
             {
                 AnsiConsole.WriteLine();
                 AnsiConsole.Write(new Rule($"[orange1]{point.Index} of {plan.Count}: {Temp.ModeName(point.Mode)} {Markup.Escape(f.Setpoint(point.SetpointC))}[/]").LeftJustified());
-                var choice = s.Yes ? "Start tracking" : await new SelectionPrompt<string>()
-                    .Title($"Set the oven to [bold]{Temp.ModeName(point.Mode).ToUpperInvariant()} {Markup.Escape(f.Setpoint(point.SetpointC))}[/] and start it, then:")
-                    .AddChoices("Start tracking", "Skip this setpoint", "Finish the session")
-                    .ShowAsync(AnsiConsole.Console, ct);
-                if (choice == "Finish the session") break;
+                var label = $"{Temp.ModeName(point.Mode)} {f.Setpoint(point.SetpointC)}";
+                var targetC = ResetWaiter.TargetFor(plan, point, ambientC ?? AssumedAmbientC);
+                string choice;
+                while (true)
+                {
+                    var hot = poller.LastCelsius is { } nowC && nowC > targetC;
+                    var wait = $"Wait for the oven to cool below {f.T(targetC, 0)} first (it's {f.T(poller.LastCelsius ?? 0, 0)} now)";
+                    var choices = new List<string> { "Start tracking", "Skip this setpoint", "Finish the session" };
+                    if (hot) choices.Insert(afterReset ? 0 : 1, wait);
+                    choice = s.Yes ? (hot && afterReset ? wait : "Start tracking") : await new SelectionPrompt<string>()
+                        .Title(hot && afterReset
+                            ? $"The oven is still hot. For [bold]{Markup.Escape(label)}[/] to start like the others, it should be below {Markup.Escape(f.T(targetC, 0))}:"
+                            : $"Set the oven to [bold]{Temp.ModeName(point.Mode).ToUpperInvariant()} {Markup.Escape(f.Setpoint(point.SetpointC))}[/] and start it, then:")
+                        .AddChoices(choices)
+                        .ShowAsync(AnsiConsole.Console, ct);
+                    if (choice != wait) break;
+
+                    if (!s.Yes) AnsiConsole.MarkupLine("[grey]Turn the oven off and leave the door shut.[/]");
+                    oven?.SetOven(point.Mode, null);
+                    DrainIdle(poller, recorder);
+                    var outcome = await waiter.RunAsync(new ResetTarget(label, targetC), autoCarryOn: s.Yes, ct);
+                    if (outcome == ResetOutcome.Quit) { stopped = true; break; }
+                    afterReset = true;
+                    if (s.Yes) { choice = "Start tracking"; break; }
+                }
+                if (stopped || choice == "Finish the session") { stopped = true; break; }
                 if (choice == "Skip this setpoint") continue;
 
                 oven?.SetOven(point.Mode, point.SetpointC);
                 DrainIdle(poller, recorder);
-                var (result, outcome) = await tracker.RunAsync(point, ct);
+                if (afterReset) recorder.Note(DateTimeOffset.UtcNow, "reset");
+                var (result, pointOutcome) = await tracker.RunAsync(point, ct);
+                result = result with { AfterReset = afterReset };
+                afterReset = false;
+                results.RemoveAll(r => r.Point.Index == point.Index);
                 results.Add(result);
                 poller.Enqueue(m => m.Beep());
                 AnsiConsole.Write("\a");
                 ConsoleReport.PointSummary(new Report(info, results), result);
-                if (outcome == PointOutcome.Quit) break;
+                if (pointOutcome == PointOutcome.Quit) { stopped = true; break; }
             }
         }
         catch (OperationCanceledException)
@@ -310,15 +412,22 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
             meter.Dispose();
         }
 
+        results = [.. results.OrderBy(r => r.Point.Index)];
         var report = new Report(info, results);
         recorder.WriteResults(info, results, report.Markdown());
         AnsiConsole.WriteLine();
         if (results.Count > 0) ConsoleReport.Full(report);
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine($"Saved to [link]{Markup.Escape(outDir)}[/]: report.md, results.json and readings.csv.");
+        var left = plan.Count(p => !results.Any(r => r.Point.Index == p.Index && r.Metrics.Reason is CompletionReason.Converged or CompletionReason.TimedOut or CompletionReason.Manual));
+        if (left > 0)
+            AnsiConsole.MarkupLine($"{left} setpoint{(left == 1 ? "" : "s")} still to do. To carry on later, even after using the oven: [bold]oventracker run --resume \"{Markup.Escape(outDir)}\"[/]");
         AnsiConsole.MarkupLine("[grey]Turn the oven off.[/]");
         return 0;
     }
+
+    /// <summary>Room temperature to assume when it wasn't measured or given: 70 °F.</summary>
+    public const double AssumedAmbientC = 21;
 
     /// <summary>
     /// Where runs are saved by default: Documents\OvenTracker on Windows; on Linux and macOS,

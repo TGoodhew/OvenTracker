@@ -76,6 +76,9 @@ public interface IOvenSimulation
 
     /// <summary>Sets the simulated oven's thermostat adjustment, as --adjustment says it is.</summary>
     void SetAdjustment(double adjustmentC);
+
+    /// <summary>Makes the simulated oven as if it had just been used at this temperature and turned off.</summary>
+    void PretendUsed(double setpointC);
 }
 
 public sealed class MeterException(string message, Exception? inner = null) : Exception(message, inner);

@@ -6,7 +6,11 @@ namespace OvenTracker.Analysis;
 /// </param>
 public sealed record TestPoint(int Index, OvenMode Mode, double SetpointC, double? AdjustmentC = null);
 
-public sealed record PointResult(TestPoint Point, PointMetrics Metrics);
+/// <param name="AfterReset">
+/// Measured after a break (a resumed session, or a wait for the oven to cool), not straight after the
+/// setpoint before it, so its time to temperature and first peak aren't comparable with the others.
+/// </param>
+public sealed record PointResult(TestPoint Point, PointMetrics Metrics, bool AfterReset = false);
 
 public enum Verdict { Accurate, Borderline, OutOfTolerance, Inconclusive }
 

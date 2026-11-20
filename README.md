@@ -86,6 +86,33 @@ Keys while tracking: **P** preheat signal · **N N** finish this setpoint now ·
 the door was opened) · **S S** skip · **Z** chart view · **Q Q** quit and write the report.
 Ctrl+C also stops cleanly and writes the report.
 
+### Splitting a session (oven reset)
+
+A full session takes hours, but it doesn't have to be done in one go. Stop after any setpoint (*Finish the
+session*, or **Q Q**). The report covers what's done, and the app prints the command to carry on. Use the
+oven, then leave the probe in it and resume:
+
+```powershell
+OvenTracker.exe run --resume "$HOME\Documents\OvenTracker\2026-11-20 1400"
+```
+
+It measures the setpoints that weren't finished, adds them to the same folder, and writes one report over
+both sittings. A run that was cut off (closed, crashed, or the PC slept) can be resumed the same way.
+
+If the oven is still hot, the app first waits for it to cool, so the next setpoint starts the way it would
+have in one go: from just above the setpoint before it (or from cold, for the first). While it waits, it
+shows the oven cooling and predicts when it will be ready. It learns how fast your oven cools as it goes,
+and also predicts when the oven will be cold enough to start a whole session again. It notices if the door
+is opened, or if the oven is turned back on, and beeps when it's ready. Press **C** to carry on early.
+
+![The oven reset display: the oven cooling, the temperature it needs to reach for the next setpoint, and how long that and starting from cold will take](docs/images/reset.png)
+
+Setpoints measured after a break are marked *after a reset* in the report. Their mean is as good as any
+other, but their *To temp* and *First peak* aren't comparable with setpoints run straight on. The app knows
+room temperature from the probe's first reading with the oven cold; if the oven is hot when you start, give
+it with `--ambient 70`. Between setpoints, too, the app offers to wait whenever the oven is hotter than the
+next setpoint should start from.
+
 ## How it decides how long to track
 
 An oven's thermostat switches the element on and off, so the temperature cycles around a mean, typically
