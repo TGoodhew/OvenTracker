@@ -11,7 +11,9 @@ public sealed class U1253BDriver : IMeterDriver
 
     public string Name => DriverName;
     public string Description => "Keysight U1253B through a U1177A Bluetooth adapter (or a U1173 cable)";
-    public string ResourceHelp => OperatingSystem.IsWindows() ? "a serial port, e.g. COM5" : "a serial device, e.g. /dev/rfcomm0";
+    public string ResourceHelp => OperatingSystem.IsWindows()
+        ? "a serial port, e.g. COM5, optionally with its settings (9600 8N1 by default), e.g. COM5:9600,N,8,1"
+        : "a serial device, e.g. /dev/rfcomm0, optionally with its settings (9600 8N1 by default), e.g. /dev/ttyUSB0:9600,N,8,1";
 
     public string NotFoundHelp => OperatingSystem.IsWindows()
         ? "Check the meter is on, the U1177A is clipped on and switched on (its light blinks), and that it is paired in " +
@@ -45,9 +47,11 @@ public sealed class U1253BDriver : IMeterDriver
     {
         if (request.Resource is { } given)
         {
-            var port = PortFinder.Normalize(given);
+            if (Check(given) is { } problem) return new ProbeResult(given, null, problem);
+            var spec = ResourceSpec.Parse(given)!;
+            var port = PortFinder.Normalize(spec.Address);
             request.Progress?.Invoke(port);
-            return Probe(port, keepOpen: true);
+            return Probe(port, keepOpen: true, spec.Settings);
         }
 
         // The port that worked last time, then each outgoing Bluetooth port. Other serial ports are
@@ -70,25 +74,41 @@ public sealed class U1253BDriver : IMeterDriver
             p.Description,
             p.IsBluetoothOutgoing ? $"{(OperatingSystem.IsWindows() ? "outgoing " : "")}Bluetooth {p.BluetoothAddress}".TrimEnd()
                 : p.IsBluetooth ? "incoming Bluetooth (not usable)" : null,
-            p.IsBluetoothOutgoing)).ToList();
+            p.IsBluetoothOutgoing,
+            p.IsBluetooth ? "Bluetooth" : "Serial")).ToList();
 
-    public ProbeResult Probe(string resource) => Probe(resource, keepOpen: false);
+    public ProbeResult Probe(string resource)
+    {
+        if (Check(resource) is { } problem) return new ProbeResult(resource, null, problem);
+        var spec = ResourceSpec.Parse(resource)!;
+        return Probe(PortFinder.Normalize(spec.Address), keepOpen: false, spec.Settings);
+    }
+
+    /// <summary>Why a resource can't be a U1253B's, or null if it can: the U1250 series connects only through a serial port.</summary>
+    public static string? Check(string resource) => ResourceSpec.Parse(resource) switch
+    {
+        null => $"\"{resource}\" isn't a serial port the app understands (e.g. COM5, or COM5:9600,N,8,1).",
+        { Visa: true, Transport: var t } => $"the U1253B connects only through a serial port (COM5, /dev/rfcomm0), not {ResourceSpec.Describe(t)} through VISA.",
+        _ => null,
+    };
 
     /// <param name="keepOpen">Hand back the connected meter instead of closing it: reopening a Bluetooth port straight away can fail.</param>
-    static ProbeResult Probe(string port, bool keepOpen)
+    /// <param name="settings">The port's settings, if given; the U1250's 9600 8N1 otherwise.</param>
+    static ProbeResult Probe(string port, bool keepOpen, SerialSettings? settings = null)
     {
-        var meter = new U1253BMeter(port);
+        var meter = new U1253BMeter(port, settings);
+        var resource = meter.Location; // with the settings when they aren't the usual ones, so they're remembered
         try
         {
             var id = meter.Connect();
-            if (keepOpen && IsU1250(id)) return new ProbeResult(port, id, null, meter);
+            if (keepOpen && IsU1250(id)) return new ProbeResult(resource, id, null, meter);
             meter.Dispose();
-            return new ProbeResult(port, id, IsU1250(id) ? null : "not a U1250-series meter");
+            return new ProbeResult(resource, id, IsU1250(id) ? null : "not a U1250-series meter");
         }
         catch (Exception ex)
         {
             meter.Dispose();
-            return new ProbeResult(port, null, Explain(ex));
+            return new ProbeResult(resource, null, Explain(ex));
         }
     }
 

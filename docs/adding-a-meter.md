@@ -121,6 +121,32 @@ For a meter with auto power-off, it says how to wake it. The PC beeps, `meter-si
 events are recorded in `readings.csv`, tracking carries on when readings return, and the report notes any
 setpoint whose readings have a gap of a minute or more.
 
+## Connections
+
+`--resource` names both where a meter is and how it's connected, so one option covers every transport.
+`ResourceSpec.Parse` (`Meter/ResourceSpec.cs`) reads it the same way for every driver:
+
+| Form | `Transport` | Notes |
+| --- | --- | --- |
+| `COM3`, `/dev/ttyUSB0` | `Serial` | `Settings` is null: use your meter's defaults (`spec.SettingsOr(...)`). |
+| `COM3:9600,E,7,2,dtr` | `Serial` | `Settings` holds baud, parity, data bits, stop bits and handshake; `DtrDsr` is set for `dtr`. |
+| `GPIB0::22::INSTR`, `GPIB::22`, `gpib:22` | `Gpib` | `Address` is the full VISA resource; `Visa` is true. |
+| `ASRL3::INSTR` | `Serial` | Through VISA. |
+| `USB0::…::INSTR`, `TCPIP0::…::INSTR` | `Usb`, `Lan` | Through VISA. |
+
+In your driver:
+
+- **Parse the resource** in `Open` and `Probe`. Refuse transports your meter doesn't have, with a message
+  that says what it does take. `U1253BDriver.Check` refuses anything but a serial port.
+- **Open a serial port** with `ResourceSpec.OpenSerial(port, settings, dtrDsr)`. It configures the port, and
+  holds DTR for meters that use DTR/DSR, such as the 34401A.
+- **Return the full resource**, settings included, as `ProbeResult.Resource` when they aren't your defaults, so
+  the app remembers them. `U1253BMeter.Location` does this.
+- **Say how each candidate is connected** in `Discover`, with `MeterCandidate.Transport` ("Serial",
+  "Bluetooth", "GPIB", "USB", "LAN"). `oventracker meters` shows it.
+- **Describe each transport** in `ResourceHelp`, e.g. "a GPIB address (GPIB0::22::INSTR), or a serial port
+  with its settings (COM3:9600,E,7,2,dtr)".
+
 ## Registering the driver
 
 Add an instance to `MeterDrivers.All` in `MeterDriver.cs`:

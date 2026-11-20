@@ -14,7 +14,8 @@ public sealed record ProbeResult(string Resource, MeterIdentity? Identity, strin
 /// <summary>Something a driver can see, for the <c>meters</c> command.</summary>
 /// <param name="Note">Anything worth knowing about it, e.g. "outgoing Bluetooth".</param>
 /// <param name="Usable">Whether it is worth asking: a driver may list places it won't probe by default.</param>
-public sealed record MeterCandidate(string Resource, string Description, string? Note, bool Usable);
+/// <param name="Transport">How it's connected, for people: "Serial", "Bluetooth", "GPIB", "USB", "LAN".</param>
+public sealed record MeterCandidate(string Resource, string Description, string? Note, bool Usable, string Transport = "Serial");
 
 /// <summary>
 /// Knows one kind of meter: how to find it, how to connect, and what to tell people when it
@@ -29,7 +30,10 @@ public interface IMeterDriver
     /// <summary>For people, e.g. "Keysight U1253B through a U1177A Bluetooth adapter".</summary>
     string Description { get; }
 
-    /// <summary>What <c>--resource</c> takes for this driver, e.g. "a serial port such as COM5".</summary>
+    /// <summary>
+    /// What <c>--resource</c> takes for this driver, e.g. "a serial port such as COM5". A driver that can be
+    /// reached more than one way lists each (see <see cref="ResourceSpec"/> for the forms).
+    /// </summary>
     string ResourceHelp { get; }
 
     /// <summary>A simulation: the app runs faster than real time and tells it the oven's setting.</summary>

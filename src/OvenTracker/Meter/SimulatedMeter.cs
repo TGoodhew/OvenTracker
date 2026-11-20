@@ -148,7 +148,7 @@ public sealed class SimulatedDriver : IMeterDriver
         return new ProbeResult(meter.Location, meter.Connect(), null, meter);
     }
 
-    public IReadOnlyList<MeterCandidate> Discover() => [new("simulator", "Simulated oven and meter", null, true)];
+    public IReadOnlyList<MeterCandidate> Discover() => [new("simulator", "Simulated oven and meter", null, true, "Simulated")];
 
     public ProbeResult Probe(string resource) => new(resource, new SimulatedMeter(new SimulatedOven(), 1).Connect(), null);
 }

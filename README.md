@@ -265,12 +265,26 @@ Each kind of meter has a driver in `src/OvenTracker/Meter`. Two come with the ap
 
 | `--meter` | What it is | `--resource` |
 | --- | --- | --- |
-| `u1253b` (the default) | A Keysight U1253B (or another U1250-series meter) through a U1177A Bluetooth adapter or a U1173 cable | A serial port: `COM5` on Windows, `/dev/rfcomm0` on Linux. Left out, the app tries the port that worked last time, then each Bluetooth link. |
+| `u1253b` (the default) | A Keysight U1253B (or another U1250-series meter) through a U1177A Bluetooth adapter or a U1173 cable | A serial port: `COM5` on Windows, `/dev/rfcomm0` on Linux (9600 8N1, or give settings: `COM5:9600,N,8,1`). Left out, the app tries the port that worked last time, then each Bluetooth link. |
 | `simulated` | A made-up oven and meter. `--simulate` is short for `--meter simulated`. | Not used. |
 
 Without `--meter` the app uses the meter that answered last time, or the U1253B. `oventracker meters` lists what
-each driver can see. `--probe` asks each likely place what is there, and `--all` asks every place. (`ports`
-and `--port` still work, as the names they had when there was only the U1253B.)
+each driver can see, and how each is connected. `--probe` asks each likely place what is there, and `--all`
+asks every place. (`ports` and `--port` still work, as the names they had when there was only the U1253B.)
+
+**Choosing the connection.** Some meters can be reached more than one way: a bench DMM may have GPIB and RS-232,
+newer ones USB and LAN. `--resource` says both where and how, by its form:
+
+| `--resource` | Connection |
+| --- | --- |
+| `COM3`, `/dev/ttyUSB0`, `/dev/rfcomm0` | A serial port, with the meter's usual settings. |
+| `COM3:9600,E,7,2`, `/dev/ttyUSB0:9600,N,8,1,dtr` | A serial port with these settings: baud, parity (N, E, O, M, S), data bits, stop bits (1, 1.5, 2), and optionally a handshake (`rts`, `xon`, `dtr`). They must match the meter's own (often on its front panel). |
+| `GPIB0::22::INSTR` (or `GPIB::22`, `gpib:22`) | GPIB address 22, through VISA. |
+| `ASRL3::INSTR` | Serial port 3, through VISA. |
+| `USB0::…::INSTR`, `TCPIP0::…::INSTR` | USB-TMC and LAN instruments, through VISA. |
+
+Each driver says which it accepts (`OvenTracker run --help`, and its row above). The app remembers the resource,
+settings and all, for next time.
 
 To add a meter, for example a bench DMM with a thermocouple input, implement `ITemperatureMeter` and
 `IMeterDriver` and list the driver in `MeterDrivers.All`. Only four members are required; the rest (the
