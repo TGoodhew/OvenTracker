@@ -132,8 +132,7 @@ public static class Dashboard
         var meter = new Table().Border(TableBorder.Simple).BorderColor(Color.Grey35).HideHeaders().AddColumn("").AddColumn("");
         meter.AddRow("Meter", Markup.Escape(m.MeterLabel));
         meter.AddRow("Link", link + (p.Reconnects > 0 ? $" [grey]({p.Reconnects} drop{(p.Reconnects == 1 ? "" : "s")})[/]" : ""));
-        if (p.BatteryPercent is { } b)
-            meter.AddRow("Battery", b < 20 ? $"[red]{b.ToString("F0", Inv)} %[/]" : $"{b.ToString("F0", Inv)} %");
+        if (BatteryText.Markup(p.BatteryPercent) is { } battery) meter.AddRow("Battery", battery);
         meter.AddRow("Readings", $"{a.Series.Count.ToString("N0", Inv)}");
         meter.AddRow("Detecting", $"turns of {f.Span(a.Hysteresis)} or more");
         if (p.LastError is { } err && p.LastErrorAt is { } at && DateTimeOffset.UtcNow - at < TimeSpan.FromMinutes(2))
