@@ -147,7 +147,8 @@ public sealed class ResetWaiter(MeterPoller poller, RunRecorder recorder, UnitFo
                     var eta = model.TimeUntil(next.TargetC) is { } e ? $"ready in about {Minutes(e.TotalMinutes)}" : "learning how fast it cools";
                     var coldEta = model.TimeUntil(cold.TargetC) is { } ce ? $"; cold in about {Minutes(ce.TotalMinutes)}" : "";
                     var silent = poller.SilentFor >= SilenceWatch.DefaultThreshold ? $"  {SilenceWatch.Message(poller.SilentFor, autoPowerOff)}" : "";
-                    AnsiConsole.WriteLine($"{f.T(shown, 0)}, {model.State.ToString().ToLowerInvariant()}: {eta}{coldEta}.{silent}");
+                    var battery = BatteryText.Plain(poller.BatteryPercent) is { } b ? $" Meter {b}." : "";
+                    AnsiConsole.WriteLine($"{f.T(shown, 0)}, {model.State.ToString().ToLowerInvariant()}: {eta}{coldEta}.{battery}{silent}");
                     lastLine = DateTimeOffset.UtcNow;
                     lastState = model.State;
                 }
@@ -190,7 +191,8 @@ public sealed class ResetWaiter(MeterPoller poller, RunRecorder recorder, UnitFo
         var rows = new List<IRenderable>
         {
             new Panel(new Rows(
-                    new Markup($"[bold orange1]OVEN RESET[/]   [grey]watching for {Minutes(watched.TotalMinutes)}[/]"),
+                    new Markup($"[bold orange1]OVEN RESET[/]   [grey]watching for {Minutes(watched.TotalMinutes)}[/]" +
+                               (BatteryText.Markup(poller.BatteryPercent) is { } battery ? $"   [grey]meter battery[/] {battery}" : "")),
                     new Markup($"{current}   {state}"),
                     new Markup(ready
                         ? autoCarryOn ? "Carrying on with the next setpoint." : $"[bold]The oven is ready for {Markup.Escape(next.Label)}.[/] Press [bold]C[/] to carry on."

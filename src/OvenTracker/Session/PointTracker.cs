@@ -216,13 +216,13 @@ public sealed class PointTracker(
                 }
                 if (due && analyzer.LatestC is not null)
                 {
-                    AnsiConsole.WriteLine(PlainLine(analyzer, format));
+                    AnsiConsole.WriteLine(PlainLine(analyzer, format, poller.BatteryPercent));
                     lastLine = analyzer.Now;
                     lastPhase = analyzer.Phase;
                 }
                 try { await Task.Delay(delay, ct); } catch (OperationCanceledException) { }
             }
-            AnsiConsole.WriteLine(PlainLine(analyzer, format));
+            AnsiConsole.WriteLine(PlainLine(analyzer, format, poller.BatteryPercent));
         }
     }
 
@@ -230,13 +230,14 @@ public sealed class PointTracker(
     public static readonly TimeSpan PlainEvery = TimeSpan.FromMinutes(1);
 
     /// <summary>One progress line for plain output: time, temperature, phase, mean so far and time left.</summary>
-    public static string PlainLine(SetpointAnalyzer a, UnitFormatter f)
+    public static string PlainLine(SetpointAnalyzer a, UnitFormatter f, double? batteryPercent = null)
     {
         var parts = new List<string> { Dashboard.Clock(a.Now) };
         if (a.LatestC is { } c) parts.Add($"{f.T(c)} ({f.D(c - a.SetpointC)})");
         parts.Add(Dashboard.PhaseText(a));
         if (a.CurrentEstimate is { } e) parts.Add($"mean so far {f.T(e.MeanC)}" + (e.HalfWidthC is { } hw ? $" ±{f.Span(hw)}" : ""));
         if (a.Phase != PointPhase.Complete) parts.Add($"time left {Dashboard.Remaining(a.EstimateRemaining())}");
+        if (BatteryText.Plain(batteryPercent) is { } battery) parts.Add(battery);
         return string.Join("  ·  ", parts);
     }
 

@@ -66,6 +66,7 @@ public sealed class ChangePrompt(MeterPoller poller, RunRecorder recorder, UnitF
             rows.Add(new Markup($"[bold]{Markup.Escape(heading)}[/]"));
             foreach (var line in big) rows.Add(new FigletText(line.Replace("°", "")).Color(Color.Orange1));
             rows.Add(new Markup((poller.LastCelsius is { } c ? $"The oven is at [bold]{Markup.Escape(f.T(c, 0))}[/] now.   " : "") +
+                                (BatteryText.Markup(poller.BatteryPercent) is { } battery ? $"Meter battery {battery}.   " : "") +
                                 $"[grey]Waiting {Markup.Escape(Waited(waited))}" +
                                 (remindEvery > TimeSpan.Zero ? $"; a reminder beeps every {Markup.Escape(Waited(remindEvery))}.[/]" : ".[/]")));
             rows.Add(new Markup(keys));
