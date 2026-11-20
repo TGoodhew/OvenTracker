@@ -231,7 +231,7 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
         if (first.Status == ReadingStatus.Overload)
             AnsiConsole.MarkupLine("[yellow]The meter reads OL: the probe isn't connected (or is broken).[/]");
         else if (first.Celsius is { } c0 && !driver.IsSimulation)
-            AnsiConsole.MarkupLine($"The probe reads {c0.ToString("F1", Inv)} °C now.");
+            AnsiConsole.MarkupLine($"The probe reads {Markup.Escape(new UnitFormatter(Temp.ParseUnit(s.Unit) ?? TempUnit.Celsius).T(c0))} now.");
         AnsiConsole.WriteLine();
 
         // 2. What to test: asked, or the saved run's when resuming.
@@ -288,9 +288,16 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
                     ? ValidationResult.Success() : ValidationResult.Error("A number such as -10, or Enter."))
                 .ShowAsync(AnsiConsole.Console, ct);
             if (double.TryParse(answer, System.Globalization.NumberStyles.Float, Inv, out var given)) adjustmentC = f.DeltaFromDisplay(given);
+            AnsiConsole.MarkupLine(adjustmentC is { } a
+                ? $"Thermostat adjustment: [bold]{Markup.Escape(new Report(new SessionInfo("", DateTimeOffset.Now, "", "", unit, 0, new AnalysisOptions(), []), []).Adjustment(a))}[/]."
+                : "Thermostat adjustment: [bold]not known[/] (the report will say how much to change it by, rather than what to set it to).");
         }
         if (adjustmentC is { } simAdjust) oven?.SetAdjustment(simAdjust); // the simulated oven obeys --adjustment too
-        if (s.SimHot is { } simHot) oven?.PretendUsed(f.FromDisplay(simHot));
+        if (s.SimHot is { } simHot && oven is not null)
+        {
+            oven.PretendUsed(f.FromDisplay(simHot));
+            first = meter.Read(); // the simulated oven is warm now, as a real one would be when the app starts
+        }
 
         // Room temperature, for knowing when the oven is cold again: given, saved, or the first reading if the oven was cold.
         var ambientC = s.Ambient is { } amb ? f.FromDisplay(amb) : resumed?.Info.AmbientC ?? (first.Celsius is < 45 and > -10 ? first.Celsius : null);
@@ -333,6 +340,23 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
         AnsiConsole.Write(planTable);
         if (!s.Grouped && modes.Count > 1)
             AnsiConsole.MarkupLine("[grey]The modes alternate at each setpoint, so the oven only ever heats up between them and bake and convection are compared under the same conditions.[/]");
+
+        // A warm oven at the start of a new session: the first setpoint is meant to start from cold.
+        var startsWarmC = resumed is null && first.Celsius is { } warmC && todo.Count > 0
+                          && warmC > ResetWaiter.TargetFor(plan, todo[0], ambientC ?? AssumedAmbientC) ? warmC : (double?)null;
+        if (startsWarmC is { } warm)
+        {
+            var coldC = ResetWaiter.TargetFor(plan, todo[0], ambientC ?? AssumedAmbientC);
+            AnsiConsole.Write(new Panel(new Markup(
+                    $"[bold]The oven is warm: {Markup.Escape(f.T(warm, 0))}.[/] The first setpoint is meant to start from cold " +
+                    $"(below {Markup.Escape(f.T(coldC, 0))}), so that its time to temperature and first peak are like-for-like.\n" +
+                    "On the next screen, press [bold]W[/] to let it cool first: the app shows it cooling and, after a few minutes, predicts how long it will take. " +
+                    "Or start anyway, and the report marks the first setpoint [italic]started warm[/] (its mean is unaffected).\n" +
+                    (ambientC is null
+                        ? $"[grey]Room temperature is assumed to be {Markup.Escape(f.T(AssumedAmbientC, 0))}, since the oven isn't cold. If it isn't, give it with --ambient.[/]"
+                        : $"[grey]Room temperature: {Markup.Escape(f.T(ambientC.Value, 0))}.[/]")))
+                .Header("[yellow]Warm oven[/]").Border(BoxBorder.Rounded).BorderColor(Color.Yellow));
+        }
 
         if (!s.Yes && !await new ConfirmationPrompt("Ready to start?").ShowAsync(AnsiConsole.Console, ct)) return 0;
 
@@ -391,8 +415,8 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
                     else if (!ask) choice = ChangeChoice.Start;                   // the simulator with --yes, or no keyboard
                     else
                     {
-                        var heading = hot && afterReset
-                            ? $"THE OVEN IS STILL HOT ({f.T(poller.LastCelsius!.Value, 0)}). PRESS W TO LET IT COOL, OR SET IT TO"
+                        var heading = hot && (afterReset || firstPrompt)
+                            ? $"THE OVEN IS {(afterReset ? "STILL HOT" : "WARM")} ({f.T(poller.LastCelsius!.Value, 0)}). PRESS W TO LET IT COOL, OR SET IT TO"
                             : firstPrompt ? "SET THE OVEN TO" : "CHANGE THE OVEN TO";
                         choice = await prompt.AskAsync(heading, Temp.ModeName(point.Mode), point.SetpointC, lastDone, waitOffer, ct);
                     }
@@ -414,10 +438,14 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
                 if (s.SimForget != point.Index) oven?.SetOven(point.Mode, point.SetpointC);
                 var idle = DrainIdle(poller, recorder);
                 if (afterReset) recorder.Note(DateTimeOffset.UtcNow, "reset");
+                // The first setpoint of a new session, started without letting a warm oven cool.
+                var startedWarm = resumed is null && !afterReset && point.Index == plan[0].Index
+                                  && poller.LastCelsius is { } atStart && atStart > targetC;
+                if (startedWarm) recorder.Note(DateTimeOffset.UtcNow, "started-warm");
                 // Where the oven starts from: the setpoint just measured, if it went straight on from it, or its last two minutes.
                 var from = previous?.Metrics.MeanC ?? StartingFrom(idle, poller.LastCelsius);
                 var (result, pointOutcome) = await tracker.RunAsync(point, ct, from, previous?.Metrics.SwingC);
-                result = result with { AfterReset = afterReset };
+                result = result with { AfterReset = afterReset, StartedWarm = startedWarm };
                 afterReset = false;
                 results.RemoveAll(r => r.Point.Index == point.Index);
                 results.Add(result);
@@ -506,6 +534,7 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
             const string stop = "Stop";
             var choices = setting.State == AutoPowerOffState.Unknown ? new[] { turnedOff, carryOn, stop } : new[] { checkAgain, carryOn, stop };
             var choice = await new SelectionPrompt<string>().Title("Auto power-off:").AddChoices(choices).ShowAsync(AnsiConsole.Console, ct);
+            AnsiConsole.MarkupLine($"Auto power-off: [bold]{Markup.Escape(choice)}[/]");
             switch (choice)
             {
                 case turnedOff:

@@ -48,7 +48,7 @@ public sealed class Report(SessionInfo info, IReadOnlyList<PointResult> results)
             [
                 Temp.ModeName(r.Point.Mode),
                 f.Setpoint(r.Point.SetpointC) + (r.Point.AdjustmentC is { } adj && adj != (info.AdjustmentC ?? 0) ? $" (adj {Adjustment(adj)})" : "")
-                    + (r.AfterReset ? " (after a reset)" : ""),
+                    + (r.AfterReset ? " (after a reset)" : "") + (r.StartedWarm ? " (started warm)" : ""),
                 m.MeanC is { } mean ? f.T(mean) : "—",
                 m.OffsetC is { } off ? f.D(off) : "—",
                 m.HalfWidthC is { } hw ? f.Span(hw) : "—",
@@ -240,6 +240,9 @@ public sealed class Report(SessionInfo info, IReadOnlyList<PointResult> results)
                       "*Swing* is the average peak-to-peak of a cycle and *Range* the lowest and highest readings while measuring. " +
                       "*To temp* is from pressing Start to first reaching the setting (or the thermostat first turning round, for an oven that runs cold); " +
                       "*First peak* is the first high point against the setting, which is the overshoot when it is positive.");
+        if (results.Any(r => r.StartedWarm))
+            sb.Append(" The setpoint marked *started warm* began with the oven still warm, not from cold, so its *To temp* and *First peak* " +
+                      "aren't from cold. Its mean is as good as any.");
         if (results.Any(r => r.AfterReset))
             sb.Append(" Setpoints marked *after a reset* were measured after a break (the run was resumed, or the oven was left to cool first), " +
                       "so their *To temp* and *First peak* aren't comparable with the others. Their mean is.");

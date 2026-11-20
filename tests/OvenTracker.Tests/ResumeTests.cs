@@ -135,6 +135,34 @@ public class ResumeTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void AFirstSetpointStartedWarmIsMarked()
+    {
+        var dir = TempDir();
+        try
+        {
+            var plan = RunCommand.BuildPlan([OvenMode.Bake], [176.67], false);
+            var info = new SessionInfo("test", DateTimeOffset.Now, "sim", "simulator", TempUnit.Fahrenheit, 15 / 1.8, Options, plan);
+            var meter = new SimulatedMeter(new SimulatedOven(51), 1);
+            meter.PretendUsed(200); // still warm from cooking
+            using (var rec = new RunRecorder(dir, info))
+            {
+                rec.Note(DateTimeOffset.UtcNow, "started-warm");
+                Measure(rec, meter, plan[0], false);
+            }
+            var r = Assert.Single(Replay.Analyze(Path.Combine(dir, "readings.csv"), Options));
+            Assert.True(r.StartedWarm);
+            Assert.False(r.AfterReset);
+            var md = new Report(info, [r]).Markdown();
+            Assert.Contains("350 °F (started warm)", md);
+            Assert.Contains("aren't from cold", md);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
     public void TheNextSetpointStartsFromJustAboveTheOneBeforeItOrFromCold()
     {
         var plan = RunCommand.BuildPlan([OvenMode.Bake, OvenMode.Convection], [176.67, 204.44], false);

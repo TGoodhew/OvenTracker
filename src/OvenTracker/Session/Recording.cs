@@ -113,12 +113,13 @@ public static class Replay
         TestPoint? point = null;
         var afterReset = false;   // the setpoint being replayed came after a break
         var resetPending = false; // a break has happened since the last setpoint began
+        bool startedWarm = false, warmPending = false;
 
         void Close(CompletionReason ifOpen)
         {
             if (analyzer is null || point is null) return;
             analyzer.Finish(ifOpen);
-            results.Add(new PointResult(point, analyzer.Metrics(), afterReset));
+            results.Add(new PointResult(point, analyzer.Metrics(), afterReset, startedWarm));
             analyzer = null;
             point = null;
         }
@@ -130,6 +131,7 @@ public static class Replay
             if (index == 0)
             {
                 if (f[5] == "Event" && f[8] is "resume" or "reset") resetPending = true;
+                if (f[5] == "Event" && f[8] == "started-warm") warmPending = true;
                 continue;
             }
             var mode = Enum.Parse<OvenMode>(f[2]);
@@ -148,6 +150,8 @@ public static class Replay
                         results.RemoveAll(r => r.Point.Index == index);
                         afterReset = resetPending;
                         resetPending = false;
+                        startedWarm = warmPending;
+                        warmPending = false;
                     }
                     point = new TestPoint(index, mode, sp);
                     analyzer = new SetpointAnalyzer(sp, options);

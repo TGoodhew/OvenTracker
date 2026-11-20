@@ -10,7 +10,11 @@ public sealed record TestPoint(int Index, OvenMode Mode, double SetpointC, doubl
 /// Measured after a break (a resumed session, or a wait for the oven to cool), not straight after the
 /// setpoint before it, so its time to temperature and first peak aren't comparable with the others.
 /// </param>
-public sealed record PointResult(TestPoint Point, PointMetrics Metrics, bool AfterReset = false);
+/// <param name="StartedWarm">
+/// The first setpoint, started with the oven still warm rather than from cold, so its time to temperature
+/// and first peak aren't from cold.
+/// </param>
+public sealed record PointResult(TestPoint Point, PointMetrics Metrics, bool AfterReset = false, bool StartedWarm = false);
 
 public enum Verdict { Accurate, Borderline, OutOfTolerance, Inconclusive }
 
