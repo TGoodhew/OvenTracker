@@ -2,10 +2,32 @@ using System.Text.Json;
 
 namespace OvenTracker.Session;
 
-/// <summary>Remembers the last port the meter answered on, so the next run finds it straight away.</summary>
+/// <summary>Remembers the meter that answered last time, and where, so the next run finds it straight away.</summary>
 public sealed class AppSettings
 {
+    /// <summary>The driver that answered last time, e.g. "u1253b".</summary>
+    public string? LastMeter { get; set; }
+
+    /// <summary>Where it answered, e.g. "COM5".</summary>
+    public string? LastResource { get; set; }
+
+    /// <summary>Settings saved before there were drivers only have this: the serial port of the one meter there was.</summary>
     public string? LastPort { get; set; }
+
+    const string DriverBeforeDrivers = "u1253b";
+
+    /// <summary>Where the given driver's meter was last time, if it was that driver.</summary>
+    public string? LastResourceFor(string driver) =>
+        LastMeter is null
+            ? driver == DriverBeforeDrivers ? LastPort : null
+            : string.Equals(LastMeter, driver, StringComparison.OrdinalIgnoreCase) ? LastResource : null;
+
+    public void Remember(string driver, string resource)
+    {
+        LastMeter = driver;
+        LastResource = resource;
+        LastPort = null;
+    }
 
     static string FilePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "OvenTracker", "settings.json");
 
@@ -26,7 +48,7 @@ public sealed class AppSettings
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
-            File.WriteAllText(FilePath, JsonSerializer.Serialize(this));
+            File.WriteAllText(FilePath, JsonSerializer.Serialize(this, new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull }));
         }
         catch { /* not worth failing a run over */ }
     }

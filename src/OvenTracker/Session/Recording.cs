@@ -6,6 +6,11 @@ using OvenTracker.Meter;
 
 namespace OvenTracker.Session;
 
+/// <param name="Meter">The meter's make and model, for people.</param>
+/// <param name="Location">Where it was, e.g. COM5.</param>
+/// <param name="Driver">The <see cref="IMeterDriver.Name"/> that read it. Null in runs saved before drivers.</param>
+/// <param name="Identity">What the meter said it was.</param>
+/// <param name="Sensor">The temperature sensor the meter was set up for, when it said.</param>
 public sealed record SessionInfo(
     string AppVersion,
     DateTimeOffset Started,
@@ -14,7 +19,10 @@ public sealed record SessionInfo(
     TempUnit Unit,
     double ToleranceC,
     AnalysisOptions Options,
-    IReadOnlyList<TestPoint> Plan);
+    IReadOnlyList<TestPoint> Plan,
+    string? Driver = null,
+    MeterIdentity? Identity = null,
+    Sensor? Sensor = null);
 
 public static class Json
 {

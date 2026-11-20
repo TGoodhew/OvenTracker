@@ -3,7 +3,7 @@ using System.Text;
 
 namespace OvenTracker.Meter;
 
-/// <summary>A U1253B reached through a serial port: the U1177A's Bluetooth SPP port, or a U1173 cable.</summary>
+/// <summary>A U1253B reached through a serial port: the U1177A's Bluetooth SPP port, or a U1173 cable. Found and opened by <see cref="U1253BDriver"/>.</summary>
 public sealed class U1253BMeter(string portName) : ITemperatureMeter
 {
     SerialPort? port;

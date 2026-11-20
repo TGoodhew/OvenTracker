@@ -152,7 +152,8 @@ public class SessionTests
         {
             var options = new AnalysisOptions();
             var plan = RunCommand.BuildPlan([OvenMode.Bake, OvenMode.Convection], [180], false);
-            var info = new SessionInfo("test", DateTimeOffset.Now, "Simulated U1253B", "simulator", TempUnit.Fahrenheit, 8, options, plan);
+            var info = new SessionInfo("test", DateTimeOffset.Now, "OvenTracker simulated meter", "simulator", TempUnit.Fahrenheit, 8, options, plan,
+                SimulatedDriver.DriverName, null, Sensor.Thermocouple("K"));
             var oven = new SimulatedOven(21);
             var meter = new SimulatedMeter(oven, 1);
             var live = new List<PointResult>();

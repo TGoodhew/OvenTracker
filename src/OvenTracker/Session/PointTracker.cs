@@ -15,6 +15,7 @@ public sealed class PointTracker(
     AnalysisOptions options,
     double toleranceC,
     string meterLabel,
+    string notTemperatureHint,
     int pointCount,
     bool fast)
 {
@@ -32,7 +33,7 @@ public sealed class PointTracker(
         var canReadKeys = !Console.IsInputRedirected;
 
         IRenderableFactory render = () => Dashboard.Render(new DashboardModel(
-            point, pointCount, analyzer, format, poller, meterLabel, toleranceC, view, lastStatus, notice,
+            point, pointCount, analyzer, format, poller, meterLabel, notTemperatureHint, toleranceC, view, lastStatus, notice,
             SafeWidth(), SafeHeight()));
 
         // Start the live display at the top of a clear screen, so it never has to scroll.

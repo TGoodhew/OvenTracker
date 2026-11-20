@@ -23,7 +23,8 @@ thermostat swings, and how bake and convection differ.
 ```powershell
 OvenTracker.exe                       # asks for the unit, modes and setpoints, then guides you
 OvenTracker.exe run --unit F --modes bake,convection --setpoints 350,400,450
-OvenTracker.exe ports --probe         # which COM port is the meter?
+OvenTracker.exe meters --probe        # which meters can it see, and which answers?
+OvenTracker.exe run --meter u1253b --resource COM5   # a particular meter, without searching
 OvenTracker.exe analyze "$HOME\Documents\OvenTracker\2026-11-20 1400" --tolerance 10
 OvenTracker.exe run --simulate --speed 120   # try it all without the meter or the oven
 ```
@@ -84,7 +85,36 @@ report spells that out.
 [Reading the results and adjusting the oven](docs/adjusting-the-oven.md) explains each column, when an
 offset is worth correcting, and how to enter the correction on a GE Profile PHS925ST1SS.
 
-## Protocol notes
+## Other meters
+
+Each kind of meter has a driver in `src/OvenTracker/Meter`. Two come with the app:
+
+| `--meter` | What it is | `--resource` |
+| --- | --- | --- |
+| `u1253b` (the default) | A Keysight U1253B (or another U1250-series meter) through a U1177A Bluetooth adapter or a U1173 cable | A serial port, e.g. `COM5`. Left out, the app tries the port that worked last time, then each outgoing Bluetooth port. |
+| `simulated` | A made-up oven and meter. `--simulate` is short for `--meter simulated`. | Not used. |
+
+Without `--meter` the app uses the meter that answered last time, or the U1253B. `oventracker meters` lists what
+each driver can see. `--probe` asks each likely place what is there, and `--all` asks every place. (`ports`
+and `--port` still work, as the names they had when there was only the U1253B.)
+
+To add a meter, for example a bench DMM with a thermocouple input over VISA:
+
+1. Implement `ITemperatureMeter` (`Meter/Meter.cs`). Only `Location`, `Connect`, `Disconnect` and `Read` are
+   required. `Read` returns the temperature in °C, or `Overload` for an open probe. Also implement any of these
+   the meter can do; the app does without the ones it can't:
+   - `ReadConfig` / `LastConfig`: what the meter is set to, and the sensor (`Sensor.Thermocouple("K")`). The
+     report uses the sensor for its accuracy section.
+   - `ReadBatteryPercent`
+   - `Beep`
+2. Implement `IMeterDriver` (`Meter/MeterDriver.cs`): its `--meter` name, how to find the meter (`Open`, `Discover`,
+   `Probe`), what `--resource` means for it, and what to tell people when it can't find the meter.
+3. Add it to `MeterDrivers.All`.
+
+`U1253BDriver` and `SimulatedDriver` are the examples. Each run records the driver, the meter's identity and the
+sensor in `session.json` and `results.json`.
+
+## Protocol notes (U1253B)
 
 The U1250 series talks at 9600 baud 8N1 through the U1177A: commands end in LF and replies in CR LF. The
 app uses `*IDN?`, `CONF?` (temperature reads `"TEMP:K CEL"` or `"TEMP:K FAR"`), `FETC?` (±9.9E+37 means
