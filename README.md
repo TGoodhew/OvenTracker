@@ -9,6 +9,10 @@ For each setpoint it works out by itself when the oven has settled and how long 
 measuring. It then reports the true average temperature, how far that is from the setting, how much the
 thermostat swings, and how bake and convection differ.
 
+![The live display while a setpoint is measured: the oven temperature cycling around the setting, the mean so far and its uncertainty, and the cycles counted](docs/images/dashboard.png)
+
+*The live display at bake 350 °F, four cycles in. (These screenshots are from the built-in simulator, `--simulate`.)*
+
 ## What you need
 
 - U1253B with a type K thermocouple in the temperature input, dial on temperature (°C or °F; the app
@@ -35,6 +39,8 @@ OvenTracker.exe run --simulate --speed 120   # try it all without the meter or t
    door shut and watch.
 3. When the oven says it has preheated, press **P**. The report shows how true that signal was.
 4. When a setpoint is done the meter beeps, and the app shows the result and asks for the next one.
+
+![The start of a run: what to do before starting, and the plan of setpoints with the modes alternating](docs/images/start.png)
 
 By default the modes alternate at each setpoint (bake 350, convection 350, bake 400, ...). The oven
 then only ever heats up between setpoints, and bake and convection are compared under the same
@@ -68,6 +74,10 @@ Turning points are found with a hysteresis set from the measured noise (at least
 never counts as a cycle.
 
 ## Output
+
+At the end, the app shows the results for every setpoint and what it found:
+
+![The results at the end of a run: the accuracy of each setpoint, how the oven got there, bake against convection, and the findings](docs/images/results.png)
 
 Each run saves to `Documents\OvenTracker\<date time>\` (or `--out`):
 
