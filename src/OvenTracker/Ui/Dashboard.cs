@@ -20,7 +20,8 @@ public sealed record DashboardModel(
     ReadingStatus? LastStatus,
     string? Notice,
     int Width,
-    int Height);
+    int Height,
+    string? Alert = null);
 
 public enum ChartView { Auto, Whole, Recent }
 
@@ -73,7 +74,7 @@ public static class Dashboard
         var header = new Rows(
             new Markup($"[bold orange1]{Temp.ModeName(m.Point.Mode).ToUpperInvariant()} {Markup.Escape(f.Setpoint(m.Point.SetpointC))}[/]" +
                        $"   [grey]setpoint {m.Point.Index} of {m.PointCount}   elapsed {Clock(now)}[/]"),
-            new Markup($"{current}{status}"),
+            new Markup(m.Alert is { } alert ? $"{current}   [bold red]{Markup.Escape(alert)}[/]" : $"{current}{status}"),
             new Markup($"[cyan]{Markup.Escape(PhaseText(a))}[/]" + (a.Phase == PointPhase.Complete ? "" : $"   time left at this setting: [bold]{Markup.Escape(Remaining(a.EstimateRemaining()))}[/]")));
 
         // Chart.

@@ -26,7 +26,8 @@ public sealed record ResetTarget(string Label, double TargetC);
 /// temperature, predicts when it will be ready for the next setpoint and when it will be cold, and
 /// says when it gets there.
 /// </summary>
-public sealed class ResetWaiter(MeterPoller poller, RunRecorder recorder, UnitFormatter f, double ambientC, bool ambientAssumed, bool fast)
+public sealed class ResetWaiter(MeterPoller poller, RunRecorder recorder, UnitFormatter f, double ambientC, bool ambientAssumed, bool fast,
+    Meter.AutoPowerOff? autoPowerOff = null)
 {
     static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
 
@@ -148,6 +149,8 @@ public sealed class ResetWaiter(MeterPoller poller, RunRecorder recorder, UnitFo
                        + (ambientAssumed ? $"   [grey]room temperature assumed {Markup.Escape(f.T(m.AmbientC, 0))} (--ambient to set it)[/]" : "")),
         };
         if (notice is not null) rows.Add(new Markup($"[yellow]{Markup.Escape(notice)}[/]"));
+        if (poller.SilentFor >= SilenceWatch.DefaultThreshold)
+            rows.Insert(1, new Markup($"[bold red]{Markup.Escape(SilenceWatch.Message(poller.SilentFor, autoPowerOff))}[/]"));
         return new Rows(rows);
     }
 

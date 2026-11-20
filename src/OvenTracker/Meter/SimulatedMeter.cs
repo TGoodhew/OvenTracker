@@ -78,6 +78,14 @@ public sealed class SimulatedOven(int seed = 1)
 public sealed class SimulatedMeter(SimulatedOven oven, double intervalSeconds) : ITemperatureMeter, IOvenSimulation
 {
     DateTimeOffset clock = DateTimeOffset.UtcNow;
+    DateTimeOffset awakeSince = DateTimeOffset.UtcNow;
+    DateTimeOffset? offSince;
+
+    /// <summary>Auto power-off, as --sim-apo sets it: off (null) by default.</summary>
+    public TimeSpan? AutoPowerOffAfter { get; set; }
+
+    /// <summary>How long the simulated meter stays off before "someone presses a button".</summary>
+    public TimeSpan WakesAfter { get; set; } = TimeSpan.FromMinutes(2);
     static readonly MeterConfig Config = new("type K, °C (simulated)", true, TempUnit.Celsius, Sensor.Thermocouple("K"));
 
     public SimulatedOven Oven => oven;
@@ -92,13 +100,22 @@ public sealed class SimulatedMeter(SimulatedOven oven, double intervalSeconds) :
     {
         oven.Step(intervalSeconds);
         clock = clock.AddSeconds(intervalSeconds);
+        if (offSince is null && AutoPowerOffAfter is { } apo && clock - awakeSince >= apo) offSince = clock;
+        if (offSince is { } off)
+        {
+            if (clock - off < WakesAfter) throw new TimeoutException("The simulated meter has switched itself off.");
+            offSince = null; // someone pressed a button
+            awakeSince = clock;
+        }
         var v = Math.Round(oven.ProbeC(), 1);
         return new MeterReading(clock, ReadingStatus.Ok, v, v.ToString("F1", System.Globalization.CultureInfo.InvariantCulture));
     }
 
     public double? ReadBatteryPercent() => 81.4;
+    public AutoPowerOffSetting ReadAutoPowerOff() => AutoPowerOffAfter is { } t ? AutoPowerOffSetting.On(t) : AutoPowerOffSetting.Off;
     public void SetOven(OvenMode mode, double? setpointC) => oven.Set(mode, setpointC);
     public void SetAdjustment(double adjustmentC) => oven.AdjustmentC = adjustmentC;
+    public void SetAutoPowerOff(TimeSpan? after) => AutoPowerOffAfter = after;
 
     public void PretendUsed(double setpointC)
     {
@@ -119,6 +136,9 @@ public sealed class SimulatedDriver : IMeterDriver
     public string Description => "a simulated oven and meter";
     public string ResourceHelp => "nothing (there is only one)";
     public bool IsSimulation => true;
+
+    /// <summary>The simulated meter can switch itself off (--sim-apo), and says whether it will.</summary>
+    public AutoPowerOff AutoPowerOff { get; } = new(TimeSpan.FromMinutes(10), ["Leave out --sim-apo."], HowToWake: "wait: the simulated meter wakes by itself after 2 minutes");
     public string NotFoundHelp => "";
     public string NotTemperatureHelp => "";
 

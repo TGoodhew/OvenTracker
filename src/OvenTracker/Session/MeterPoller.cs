@@ -19,7 +19,27 @@ public sealed class MeterPoller : IDisposable
     readonly Channel<MeterReading> readings = Channel.CreateUnbounded<MeterReading>(new UnboundedChannelOptions { SingleReader = true });
     readonly ConcurrentQueue<Action<ITemperatureMeter>> commands = new();
     readonly CancellationTokenSource cts = new();
+    readonly Stopwatch clock = new();
+    TimeSpan? lastGoodAt;
+    TimeSpan lastLinkAttempt;
+    long attempts, attemptAtLastGood = -1, attemptAtLastLink;
     Thread? thread;
+
+    /// <summary>
+    /// How long the meter can be quiet, with the link still up, before the poller tries reconnecting
+    /// anyway (and then again each time this passes). A meter that has switched itself off times out on
+    /// every read while the link is fine, so the poller keeps asking at the normal rate and carries on
+    /// the moment the meter is woken. In the meter's time, so the simulator's speed-up applies.
+    /// </summary>
+    public TimeSpan QuietReconnectAfter { get; init; } = TimeSpan.FromMinutes(2);
+
+    /// <summary>
+    /// Time passed in the meter's own terms since a moment: real time for a real meter; for the simulator,
+    /// the number of reads since then times the interval, which is its clock (the timer can't keep up with
+    /// a large speed-up, so real time × speed would overstate it).
+    /// </summary>
+    TimeSpan MeterTimeSince(TimeSpan realThen, long attemptThen) =>
+        speed > 1 ? interval * (attempts - attemptThen) : clock.Elapsed - realThen;
 
     /// <param name="speed">Real-time speed-up, for the simulator only.</param>
     public MeterPoller(ITemperatureMeter meter, TimeSpan interval, double speed = 1, bool connected = false)
@@ -44,6 +64,12 @@ public sealed class MeterPoller : IDisposable
     public int Reconnects { get; private set; }
     public long ReadCount { get; private set; }
 
+    /// <summary>
+    /// How long since the last reading, in the meter's time (simulated time for the simulator). Zero
+    /// until the first reading, and while readings arrive at the normal rate it stays near the interval.
+    /// </summary>
+    public TimeSpan SilentFor => lastGoodAt is { } g ? MeterTimeSince(g, attemptAtLastGood) : TimeSpan.Zero;
+
     /// <summary>Battery is checked every this many readings.</summary>
     public int BatteryEvery { get; init; } = 300;
 
@@ -59,7 +85,7 @@ public sealed class MeterPoller : IDisposable
     {
         var token = cts.Token;
         var period = TimeSpan.FromTicks((long)(interval.Ticks / speed));
-        var clock = Stopwatch.StartNew();
+        clock.Start();
         var next = TimeSpan.Zero;
         var failures = 0;
 
@@ -79,9 +105,12 @@ public sealed class MeterPoller : IDisposable
                     try { command(meter); } catch { /* a beep that fails is not worth losing the link over */ }
                 }
                 if (ReadCount % BatteryEvery == 0) BatteryPercent = meter.ReadBatteryPercent() ?? BatteryPercent;
+                attempts++;
                 var r = meter.Read();
                 ReadCount++;
                 failures = 0;
+                lastGoodAt = clock.Elapsed;
+                attemptAtLastGood = attempts;
                 if (r.Status != ReadingStatus.Error) Config = meter.LastConfig;
                 if (r is { Status: ReadingStatus.Ok, Celsius: { } c }) LastCelsius = c;
                 readings.Writer.TryWrite(r);
@@ -91,13 +120,25 @@ public sealed class MeterPoller : IDisposable
                 failures++;
                 LastError = ex.Message;
                 LastErrorAt = DateTimeOffset.UtcNow;
-                if (!IsConnected || failures >= 3 || ex is IOException or InvalidOperationException or UnauthorizedAccessException)
+                // Quiet for long enough that the link may be gone after all: try it again, now and then.
+                var quietTooLong = ex is TimeoutException
+                                   && SilentFor >= QuietReconnectAfter
+                                   && MeterTimeSince(lastLinkAttempt, attemptAtLastLink) >= QuietReconnectAfter;
+                var linkDown = !IsConnected
+                               || ex is IOException or InvalidOperationException or UnauthorizedAccessException
+                               || (ex is not TimeoutException && failures >= 3)
+                               || quietTooLong;
+                if (linkDown)
                 {
                     if (IsConnected) Reconnects++;
                     IsConnected = false;
                     State = LinkState.Reconnecting;
+                    lastLinkAttempt = clock.Elapsed;
+                    attemptAtLastLink = attempts;
                     try { meter.Disconnect(); } catch { }
-                    token.WaitHandle.WaitOne(TimeSpan.FromSeconds(Math.Min(10, 2 * failures)));
+                    // A meter that doesn't answer (switched off) is retried soon; a failing link backs off further.
+                    var backoff = Math.Min(ex is TimeoutException ? 2 : 10, 2 * failures);
+                    token.WaitHandle.WaitOne(TimeSpan.FromSeconds(backoff / speed));
                     next = clock.Elapsed;
                     continue;
                 }

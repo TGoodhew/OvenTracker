@@ -45,8 +45,8 @@ public sealed record Sensor(string Name, double LimitC, double LimitFraction, bo
 /// <summary>
 /// A thermometer the app can poll. Calls are synchronous and come from one thread. Only
 /// <see cref="Location"/>, <see cref="Connect"/>, <see cref="Disconnect"/> and <see cref="Read"/>
-/// are required: a meter that can't report a battery, beep or say what it is set to leaves the
-/// rest as they are, and the app does without.
+/// are required: a meter that can't report a battery, beep, say what it is set to or report its auto
+/// power-off leaves the rest as they are, and the app does without. docs/adding-a-meter.md explains each.
 /// </summary>
 public interface ITemperatureMeter : IDisposable
 {
@@ -65,6 +65,12 @@ public interface ITemperatureMeter : IDisposable
 
     double? ReadBatteryPercent() => null;
 
+    /// <summary>
+    /// What the meter's auto power-off is set to, if it can say. Unknown by default; the driver's
+    /// <see cref="IMeterDriver.AutoPowerOff"/> says whether the meter has one at all.
+    /// </summary>
+    AutoPowerOffSetting ReadAutoPowerOff() => AutoPowerOffSetting.Unknown;
+
     /// <summary>Makes the meter beep when a setpoint is done, if it can.</summary>
     void Beep() { }
 }
@@ -79,6 +85,9 @@ public interface IOvenSimulation
 
     /// <summary>Makes the simulated oven as if it had just been used at this temperature and turned off.</summary>
     void PretendUsed(double setpointC);
+
+    /// <summary>Gives the simulated meter an auto power-off (--sim-apo), or none.</summary>
+    void SetAutoPowerOff(TimeSpan? after);
 }
 
 public sealed class MeterException(string message, Exception? inner = null) : Exception(message, inner);
