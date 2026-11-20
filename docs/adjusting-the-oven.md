@@ -9,10 +9,11 @@ GE electronic ovens of that era work the same way, and the first half of this pa
 - Look at **Offset** (measured minus set). If the oven runs **+10 °F hot**, set the thermostat adjustment
   **10 °F cooler**. If it runs **−10 °F cold**, set it **10 °F hotter**. The correction is always the
   offset with its sign reversed.
-- The report works this out for you. Its Findings section says, for example, *"setting it to about
-  −10 °F would centre it"*. That number is what to enter.
-- The adjustment is **added to whatever is already set**. If the oven already has an adjustment, add the
-  new correction to it (see [Correcting an oven that already has an adjustment](#correcting-an-oven-that-already-has-an-adjustment)).
+- The report works this out for you. Its **Best adjustment** section says, for example, *"set the oven's
+  thermostat adjustment to −10 °F (it's 0 °F now)"*. That number is what to enter.
+- Tell the app the oven's current adjustment. `run` asks at the start, or give it with `--adjustment`. The
+  adjustment is **added to whatever is already set**, so without it the report can only say how much to
+  change it by (see [Correcting an oven that already has an adjustment](#correcting-an-oven-that-already-has-an-adjustment)).
 - Don't adjust for offsets of a few degrees. The probe itself is only good to about ±4 °F (see
   [Is it worth adjusting?](#is-it-worth-adjusting)).
 - After any adjustment, run the tracker again to check it.
@@ -47,7 +48,7 @@ The tolerance is ±15 °F (±8 °C) unless you set `--tolerance`.
 | Verdict | Meaning | What to do |
 | --- | --- | --- |
 | **Accurate** | The offset is within tolerance, including its ±95 % uncertainty. | Nothing is required. You can still trim a consistent offset of 5 °F or more if you want (see the table below). |
-| **Borderline** | The offset is close to the tolerance and the uncertainty overlaps it. | Adjust if the Findings suggest a correction of 5 °F or more. Otherwise re-run, perhaps with `--precision 1`, to firm it up. |
+| **Borderline** | The offset is close to the tolerance and the uncertainty overlaps it. | Adjust if the report suggests a correction of 5 °F or more. Otherwise re-run, perhaps with `--precision 1`, to firm it up. |
 | **Out of tolerance** | The oven is clearly outside tolerance at this setting. | Adjust it. |
 | **Inconclusive** | There was not enough settled data (the setpoint was skipped, interrupted or finished too early). | Run that setpoint again. |
 
@@ -56,21 +57,43 @@ The tolerance is ±15 °F (±8 °C) unless you set `--tolerance`.
 The Findings at the top of the report summarise each mode, for example:
 
 > Bake: runs 10.3 °F hot on average over 3 setpoints (worst 11.8 °F). The error is about the same at every
-> setpoint, so the oven's offset adjustment would correct it. If your oven has a temperature offset
-> setting, setting it to about −10 °F would centre it (rounded to whatever steps the oven allows).
+> setpoint, so the oven's thermostat adjustment can correct it.
 
-Three things to look for:
+"About the same at every setpoint" means the oven is off by a fixed amount, and the adjustment will
+correct it everywhere. "The error grows with temperature" (say +4 °F at 325 °F but +16 °F at 450 °F) means
+one adjustment can't fix all of it. The *Best adjustment* section then shows what's left at each setting.
 
-1. **The suggested setting** ("about −10 °F"). This is the average offset across the setpoints you ran,
-   with the sign reversed and rounded to a whole degree.
-2. **Whether one offset can fix it.** "About the same at every setpoint" means the oven is off by a fixed
-   amount, and the adjustment will correct it everywhere. "The error grows with temperature" (say +4 °F at
-   325 °F but +16 °F at 450 °F) means the adjustment can only centre it on average. In that case it is
-   better to correct for the temperatures you bake at most. For example, if most of your baking is at
-   350 °F, use the offset measured at 350 °F, not the average.
-3. **Bake against convection.** The PHS925 has one thermostat adjustment (see
-   [Convection](#convection-and-auto-recipe-conversion)). If bake and convection need different
-   corrections, the report says so and gives the value that splits the difference.
+### The best adjustment
+
+This section is the one to act on. For example:
+
+> **Bake and convection (one adjustment for both): set the oven's thermostat adjustment to −8 °F (it's 0 °F now).**
+>
+> - This makes the overall error across the setpoints measured as small as it can.
+> - Afterwards the worst setpoint is still 7 °F out, so the table below says what to set to make up for it.
+
+Then come a table of each setpoint's error now and after adjusting, and, where the adjustment alone still
+leaves a setting 5 °F or more out, a table of **what to set**. For example, *"Bake, for 425 °F, set the
+oven to 418 °F"*.
+
+Things worth knowing:
+
+- **The PHS925 has one adjustment for bake and convection**, so by default the app finds the one value that
+  suits both (see [Convection](#convection-and-auto-recipe-conversion)). If the two need different
+  corrections, the table of what to set covers the difference.
+- **"Best" is the smallest overall error** across the setpoints you ran. If most of your baking is at one
+  temperature, `--favour 350` makes the oven right there instead, and `--objective minimax` keeps the worst
+  setpoint as close as it can. Both work with `analyze`, so you can try them on a run you've already done:
+
+  ```powershell
+  OvenTracker analyze "Documents\OvenTracker\2026-11-20 1400" --favour 350
+  ```
+
+- **How far the adjustment moves the oven is assumed** (1 °F per 1 °F) until it has been measured. Run the
+  same setpoints again after adjusting, and analyze the two runs together; the app then measures it. See
+  [How the oven's control responds to its adjustment](oven-control-model.md).
+- **If the report suggests extra setpoints**, the ones you ran can't show whether the error changes with
+  temperature, so add them to the next run.
 
 ### The preheat signal
 
@@ -134,23 +157,28 @@ round it. A correction of −6 °C is −11 °F. Or run the tracker with `--unit
 
 ## Correcting an oven that already has an adjustment
 
-The tracker measures the oven **as it is set now**, including any adjustment already made. So the
-correction it suggests is a change to make, not the final number to enter:
+The tracker measures the oven **as it is set now**, including any adjustment already made. So tell it
+what the adjustment is: `run` asks at the start, or give it with `--adjustment -5`. The report then gives
+the number to enter, *"set it to −15 °F (it's −5 °F now)"*, and does the arithmetic below for you.
 
-> new adjustment = current adjustment + the report's suggested correction
+If the run didn't record it, the report gives a change to make instead (*"change it by −10 °F"*), and:
+
+> new adjustment = current adjustment + the change
 
 The oven shows the adjustment as a signed number, positive for hotter and negative for cooler, so this
 is plain arithmetic on what the display shows:
 
 | Display shows now | Report says | Set the display to |
 | --- | --- | --- |
-| 0 | runs 10 °F hot, set about −10 °F | −10 |
-| −5 | runs 10 °F hot, set about −10 °F | −15 (−5 − 10) |
-| +10 | runs 4 °F hot, set about −4 °F | +6 (+10 − 4) |
-| −15 | runs 6 °F cold, set about +6 °F | −9 (−15 + 6) |
+| 0 | change it by −10 °F | −10 |
+| −5 | change it by −10 °F | −15 (−5 − 10) |
+| +10 | change it by −4 °F | +6 (+10 − 4) |
+| −15 | change it by +6 °F | −9 (−15 + 6) |
 
-That is why step 2 says to write the current number down. It is also the reason to re-run the tracker
-after every adjustment, rather than adjusting twice from the same report.
+You can also add it afterwards: `OvenTracker analyze "<run folder>" --adjustment -5`. That is why step 2
+says to write the current number down. It is also the reason to re-run the tracker after every
+adjustment, rather than adjusting twice from the same report. Give the new adjustment on the next run,
+and analyse the two runs together: the app then measures how far the adjustment really moves your oven.
 
 ## Convection and Auto Recipe Conversion
 
@@ -173,21 +201,26 @@ Turn it back on afterwards if you like recipes converted for you. It does not af
 adjustment.
 
 If bake and convection need different corrections, a single adjustment can't fix both. The report gives
-the value that splits the difference. Alternatively, set the adjustment for the mode you use most and
-allow for the other one in your recipes. For example, if convection still runs 10 °F hot after you have
-corrected bake, set convection recipes 10 °F lower.
+the value that suits both best, and a table of what to set in each mode. Alternatively, set the adjustment
+for the mode you use most (`--separate-adjustments` shows each mode's own best value) and allow for the
+other one in your recipes. For example, if convection still runs 10 °F hot after you have corrected bake,
+set convection recipes 10 °F lower.
 
 ## Checking the adjustment
 
 After adjusting, run the tracker again at the setpoint you use most:
 
 ```powershell
-OvenTracker.exe run --unit F --modes bake,convection --setpoints 350
+OvenTracker.exe run --unit F --modes bake,convection --setpoints 350 --adjustment -11
 ```
 
 The Offset should now be within a few degrees of zero, and the verdict should be Accurate. If it moved by
-less (or more) than you adjusted, adjust again by the remaining offset, using the rule in
-[Correcting an oven that already has an adjustment](#correcting-an-oven-that-already-has-an-adjustment).
+less (or more) than you adjusted, analyse this run together with the one before it. The app then measures
+how far the adjustment moves your oven and gives a better setting:
+
+```powershell
+OvenTracker.exe analyze "Documents\OvenTracker\2026-11-20 1400" "Documents\OvenTracker\2026-11-22 0900"
+```
 
 Hang the probe in the same place (the centre of the oven, clear of the racks and walls) for every run, so
 that runs can be compared. Heat near the elements and walls is very different from the centre.
@@ -203,7 +236,8 @@ Suppose a run at 325, 350 and 400 °F in bake gives:
 | Bake | 400 °F | 410.9 °F | +10.9 °F | 1.8 °F | Accurate | 33.5 °F |
 
 Findings: *"Bake: runs 10.6 °F hot on average … The error is about the same at every setpoint, so the
-oven's offset adjustment would correct it. … setting it to about −11 °F would centre it."*
+oven's thermostat adjustment can correct it."* Best adjustment: *"Bake: set the oven's thermostat
+adjustment to −11 °F (it's 0 °F now)."*
 
 - Every setpoint is within the ±15 °F tolerance, so this is optional. But the oven is a steady 10 to
   11 °F hot, well beyond the probe's ±4 °F, so it is a real error and worth correcting.

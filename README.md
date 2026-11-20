@@ -65,6 +65,7 @@ OvenTracker.exe run --unit F --modes bake,convection --setpoints 350,400,450
 OvenTracker.exe meters --probe        # which meters can it see, and which answers?
 OvenTracker.exe run --meter u1253b --resource COM5   # a particular meter, without searching
 OvenTracker.exe analyze "$HOME\Documents\OvenTracker\2026-11-20 1400" --tolerance 10
+OvenTracker.exe analyze "<earlier run>" "<later run>" --favour 350   # runs together; right at 350 °F
 OvenTracker.exe run --simulate --speed 120   # try it all without the meter or the oven
 ```
 
@@ -117,8 +118,9 @@ At the end, the app shows the results for every setpoint and what it found:
 Each run saves to `Documents\OvenTracker\<date time>\` (on Linux, `~/Documents/OvenTracker/<date time>/`),
 or to `--out`:
 
-- `report.md`: findings, a table per setpoint, bake against convection, preheat signal accuracy, how
-  long each setpoint needed, and how far to trust it.
+- `report.md`: findings, a table per setpoint, the best thermostat adjustment (and what to set where it
+  falls short), bake against convection, preheat signal accuracy, how long each setpoint needed, and how
+  far to trust it.
 - `results.json`: the same numbers, machine-readable (°C).
 - `readings.csv`: every reading as it arrived, flushed line by line, with the events needed to replay
   the analysis. `analyze` re-runs it, for example with a different tolerance.
@@ -130,6 +132,15 @@ report spells that out.
 
 [Reading the results and adjusting the oven](docs/adjusting-the-oven.md) explains each column, when an
 offset is worth correcting, and how to enter the correction on a GE Profile PHS925ST1SS.
+
+The **best adjustment** is the oven thermostat setting that fits all the setpoints measured best, on the
+oven's own steps (1 °F, up to ±35 °F, by default). Tell the app the oven's current adjustment (`run` asks,
+or `--adjustment`), and the report says what to set it to. When the error changes with temperature, no
+single setting fixes it all, so the report also shows what's left at each setpoint and what to set to make
+up for it. `--objective minimax` keeps the worst setpoint as close as it can, and `--favour 350` makes the
+oven right at 350 °F. Runs of the same setpoints at two different adjustments, analysed together, measure
+how far the adjustment really moves the oven. [How the oven's control responds to its
+adjustment](docs/oven-control-model.md) explains the method.
 
 ## Other meters
 

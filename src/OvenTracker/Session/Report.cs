@@ -47,7 +47,7 @@ public sealed class Report(SessionInfo info, IReadOnlyList<PointResult> results)
             yield return (r, v,
             [
                 Temp.ModeName(r.Point.Mode),
-                f.Setpoint(r.Point.SetpointC),
+                f.Setpoint(r.Point.SetpointC) + (r.Point.AdjustmentC is { } adj && adj != (info.AdjustmentC ?? 0) ? $" (adj {Adjustment(adj)})" : ""),
                 m.MeanC is { } mean ? f.T(mean) : "—",
                 m.OffsetC is { } off ? f.D(off) : "—",
                 m.HalfWidthC is { } hw ? f.Span(hw) : "—",
@@ -93,26 +93,17 @@ public sealed class Report(SessionInfo info, IReadOnlyList<PointResult> results)
                 var hi = spread.MaxBy(r => r.Point.SetpointC)!;
                 var change = hi.Metrics.OffsetC!.Value - lo.Metrics.OffsetC!.Value;
                 if (Math.Abs(change) >= Math.Max(info.Options.PrecisionC * 2, 1.0))
-                    sb.Append($" The error {(change > 0 ? "grows" : "shrinks")} with temperature: {f.D(lo.Metrics.OffsetC!.Value)} at {f.Setpoint(lo.Point.SetpointC)}, {f.D(hi.Metrics.OffsetC!.Value)} at {f.Setpoint(hi.Point.SetpointC)}, so a single offset can't correct all of it.");
+                    sb.Append($" The error {(change > 0 ? "grows" : "shrinks")} with temperature: {f.D(lo.Metrics.OffsetC!.Value)} at {f.Setpoint(lo.Point.SetpointC)}, {f.D(hi.Metrics.OffsetC!.Value)} at {f.Setpoint(hi.Point.SetpointC)}, so a single adjustment can't correct all of it.");
                 else
-                    sb.Append(" The error is about the same at every setpoint, so the oven's offset adjustment would correct it.");
+                    sb.Append(" The error is about the same at every setpoint, so the oven's thermostat adjustment can correct it.");
             }
-            if (Math.Abs(s.MeanOffsetC) > info.ToleranceC / 3)
-                sb.Append($" If your oven has a temperature offset setting, setting it to about {f.D(s.SuggestedCalibrationC, 0)} would centre it (rounded to whatever steps the oven allows).");
             if (s.MeanSwingC is { } sw)
                 sb.Append($" The thermostat swings {f.Span(sw)} peak to peak" + (s.MeanCycleMinutes is { } cm ? $", one cycle every {cm.ToString("F1", Inv)} min." : "."));
             yield return sb.ToString();
         }
 
-        var modes = SessionSummary.ByMode(results);
-        if (modes.Count == 2 && Math.Abs(modes[0].SuggestedCalibrationC - modes[1].SuggestedCalibrationC) > info.ToleranceC / 3)
-        {
-            var split = (modes[0].SuggestedCalibrationC + modes[1].SuggestedCalibrationC) / 2;
-            var splitText = Math.Abs(f.DeltaToDisplay(split)) < 0.5 ? "leaving it at 0 splits the difference" : $"{f.D(split, 0)} splits the difference";
-            yield return $"Most ovens have one offset setting for every mode. Bake would want {f.D(modes[0].SuggestedCalibrationC, 0)} and convection " +
-                         $"{f.D(modes[1].SuggestedCalibrationC, 0)}, so one setting can't fix both: {splitText}, " +
-                         "or set it for the mode you use most and allow for the difference in the other.";
-        }
+        foreach (var a in Advice())
+            yield return AdviceHeadline(a) + " Details are under Best adjustment.";
 
         foreach (var c in SessionSummary.Compare(results))
         {
@@ -121,6 +112,86 @@ public sealed class Report(SessionInfo info, IReadOnlyList<PointResult> results)
                 : $"At {f.Setpoint(c.SetpointC)}, bake and convection are the same within the measurement's uncertainty ({f.D(c.DeltaMeanC)}).";
         }
     }
+
+    public AdjustmentOptions AdjustOptions => info.Adjust ?? AdjustmentOptions.For(info.Unit);
+
+    /// <summary>Each measured setpoint, with the adjustment the oven had for it.</summary>
+    public IReadOnlyList<AdjustPoint> AdjustPoints() =>
+        results.Where(r => r.Metrics.OffsetC is not null)
+            .Select(r => new AdjustPoint(r.Point.Mode, r.Point.SetpointC, r.Metrics.OffsetC!.Value, r.Metrics.HalfWidthC,
+                r.Point.AdjustmentC ?? info.AdjustmentC ?? 0))
+            .ToList();
+
+    public IReadOnlyList<AdjustmentAdvice> Advice() => AdjustmentAdvisor.Advise(AdjustPoints(), AdjustOptions, info.AdjustmentC);
+
+    /// <summary>An adjustment setting as the oven shows it: whole degrees, signed, and plain 0.</summary>
+    public string Adjustment(double c) => Math.Abs(f.DeltaToDisplay(c)) < 0.5 ? $"0 {f.Symbol}" : f.D(c, 0);
+
+    string Scope(AdjustmentAdvice a) =>
+        a.Mode is { } m ? Temp.ModeName(m) : "Bake and convection (one adjustment for both)";
+
+    /// <summary>The recommendation in a sentence.</summary>
+    public string AdviceHeadline(AdjustmentAdvice a)
+    {
+        var scope = Scope(a);
+        if (Math.Abs(f.DeltaToDisplay(a.ChangeC)) < 0.5)
+            return $"{scope}: leave the thermostat adjustment as it is{(a.CurrentC is { } c ? $" ({Adjustment(c)})" : "")}; no step would make the oven more accurate.";
+        return a.NewSettingC is { } set
+            ? $"{scope}: set the oven's thermostat adjustment to {Adjustment(set)} (it's {Adjustment(a.CurrentC!.Value)} now)."
+            : $"{scope}: change the oven's thermostat adjustment by {f.D(a.ChangeC, 0)}, from whatever it is set to now.";
+    }
+
+    /// <summary>Everything worth saying about a recommendation, after the headline.</summary>
+    public IEnumerable<string> AdviceDetails(AdjustmentAdvice a)
+    {
+        var o = a.Options;
+        yield return o.FavourC is { } fav
+            ? $"This makes the oven right at {f.Setpoint(fav)}, the temperature you favour."
+            : o.Objective == AdjustObjective.Minimax
+                ? "This keeps the worst of the setpoints measured as close to its setting as it can."
+                : "This makes the overall error across the setpoints measured as small as it can.";
+        yield return a.WorstAfterC < AdjustmentAdvisor.WorthC
+            ? $"Afterwards every setpoint measured should be within {f.Span(a.WorstAfterC)} of its setting, which is about the probe's own accuracy."
+            : $"Afterwards the worst setpoint is still {f.Span(a.WorstAfterC)} out, so the table below says what to set to make up for it.";
+        if (a.GainMeasured)
+            yield return $"Measured from runs at different adjustments: each degree of adjustment moves this oven {a.Gain.ToString("F2", Inv)} degrees" +
+                         (a.GainHalfWidthC is { } hw ? $" (±{hw.ToString("F2", Inv)})." : ".");
+        else if (o.Model == AdjustModel.Gain && Math.Abs(a.Gain - 1) > 1e-6)
+            yield return $"This assumes the adjustment is scaled by the oven's own error slope, so each degree moves it {a.Gain.ToString("F2", Inv)} degrees. That hasn't been measured; see docs/oven-control-model.md.";
+        else
+            yield return "This assumes the adjustment moves the oven by the same amount at every setting. That hasn't been measured for this oven: after adjusting, run the same setpoints again and analyze both runs together (see docs/oven-control-model.md).";
+        if (a.Clamped)
+            yield return $"The oven's adjustment only goes to ±{f.Span(o.RangeC, 0)}, so this is its limit. An error this large is worth a service call: the oven's sensor may be faulty.";
+        if (a.CurrentC is null && Math.Abs(f.DeltaToDisplay(a.ChangeC)) >= 0.5)
+            yield return "The run didn't record the oven's current adjustment. Give it with --adjustment and the app will say what to set it to.";
+        if (a.Curved)
+            yield return "The error bends with temperature rather than following a straight line, so where it matters, use the table of what to set.";
+        if (a.TooFewSetpoints is { } why)
+            yield return $"{why} Worth adding: {string.Join(", ", a.AddSetpointsC.Select(RoundedSetpoint))}.";
+    }
+
+    /// <summary>A setpoint to suggest, rounded to one people would set: 25 °F or 10 °C.</summary>
+    string RoundedSetpoint(double c)
+    {
+        var step = info.Unit == TempUnit.Fahrenheit ? 25 : 10;
+        return f.Setpoint(f.FromDisplay(Math.Round(f.ToDisplay(c) / step) * step));
+    }
+
+    public static readonly string[] ResidualColumns = ["Mode", "Set", "Now", "After adjusting", "±95 %", "Within tolerance?"];
+
+    public IEnumerable<string[]> ResidualRows(AdjustmentAdvice a) => a.Residuals.Select(r =>
+    {
+        var hw = r.HalfWidthC ?? 0;
+        var ok = Math.Abs(r.AfterC) + hw <= info.ToleranceC ? "Yes" : Math.Abs(r.AfterC) - hw > info.ToleranceC ? "No" : "Borderline";
+        return new[] { Temp.ModeName(r.Mode), f.Setpoint(r.SetpointC), f.D(r.NowC), f.D(r.AfterC), r.HalfWidthC is { } h ? f.Span(h) : "—", ok };
+    });
+
+    public static readonly string[] DialColumns = ["Mode", "For", "Set the oven to"];
+
+    public IEnumerable<string[]> DialRows(AdjustmentAdvice a) => a.DialCorrections.Select(d => new[]
+    {
+        Temp.ModeName(d.Mode), f.Setpoint(d.WantC), $"{Math.Round(f.ToDisplay(d.SetC)).ToString("0", Inv)} {f.Symbol}",
+    });
 
     /// <summary>What the tracking time came to, and what to allow next time.</summary>
     public IEnumerable<string> Durations()
@@ -167,6 +238,32 @@ public sealed class Report(SessionInfo info, IReadOnlyList<PointResult> results)
                       "*First peak* is the first high point against the setting, which is the overshoot when it is positive.");
         sb.AppendLine();
 
+        var advice = Advice();
+        if (advice.Count > 0)
+        {
+            sb.AppendLine("## Best adjustment");
+            sb.AppendLine();
+            foreach (var a in advice)
+            {
+                sb.AppendLine($"**{AdviceHeadline(a)}**");
+                sb.AppendLine();
+                foreach (var line in AdviceDetails(a)) sb.AppendLine($"- {line}");
+                sb.AppendLine();
+                Table(sb, ResidualColumns, ResidualRows(a));
+                sb.AppendLine();
+                var dial = DialRows(a).ToList();
+                if (dial.Count > 0)
+                {
+                    sb.AppendLine("What to set after adjusting, where the adjustment alone leaves the oven 5 °F (3 °C) or more out:");
+                    sb.AppendLine();
+                    Table(sb, DialColumns, dial);
+                    sb.AppendLine();
+                }
+            }
+            sb.AppendLine("[Reading the results and adjusting the oven](https://github.com/TGoodhew/OvenTracker/blob/main/docs/adjusting-the-oven.md) explains how to enter the adjustment.");
+            sb.AppendLine();
+        }
+
         var preheat = results.Where(r => r.Metrics.PreheatSignalMinutes is not null).ToList();
         if (preheat.Count > 0)
         {
@@ -212,7 +309,8 @@ public sealed class Report(SessionInfo info, IReadOnlyList<PointResult> results)
         sb.AppendLine("- The probe measures the air where you put it. Ovens are hotter near the elements and walls, so keep it in the centre for every run if you want to compare runs.");
         sb.AppendLine("- If your oven converts convection temperatures down automatically (often by 25 °F / 15 °C), the convection setting entered here should be the one the oven actually targets.");
         sb.AppendLine();
-        sb.AppendLine($"Settings: precision ±{f.Span(info.Options.PrecisionC)}, at least {info.Options.MinCycles} cycles, up to {info.Options.MaxPointMinutes:F0} min per setpoint. Raw data: `readings.csv`.");
+        sb.AppendLine($"Settings: precision ±{f.Span(info.Options.PrecisionC)}, at least {info.Options.MinCycles} cycles, up to {info.Options.MaxPointMinutes:F0} min per setpoint. " +
+                      $"Oven's thermostat adjustment during the run: {(info.AdjustmentC is { } adj ? Adjustment(adj) : "not recorded")}. Raw data: `readings.csv`.");
         return sb.ToString();
     }
 

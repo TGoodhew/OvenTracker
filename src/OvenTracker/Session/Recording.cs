@@ -11,6 +11,8 @@ namespace OvenTracker.Session;
 /// <param name="Driver">The <see cref="IMeterDriver.Name"/> that read it. Null in runs saved before drivers.</param>
 /// <param name="Identity">What the meter said it was.</param>
 /// <param name="Sensor">The temperature sensor the meter was set up for, when it said.</param>
+/// <param name="AdjustmentC">The oven's thermostat adjustment (offset) setting during the run, if given.</param>
+/// <param name="Adjust">How to work out the best adjustment: the oven's steps and range, and the objective.</param>
 public sealed record SessionInfo(
     string AppVersion,
     DateTimeOffset Started,
@@ -22,7 +24,9 @@ public sealed record SessionInfo(
     IReadOnlyList<TestPoint> Plan,
     string? Driver = null,
     MeterIdentity? Identity = null,
-    Sensor? Sensor = null);
+    Sensor? Sensor = null,
+    double? AdjustmentC = null,
+    AdjustmentOptions? Adjust = null);
 
 public static class Json
 {

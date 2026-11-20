@@ -63,5 +63,25 @@ public static class ConsoleReport
 
         foreach (var line in report.Findings()) AnsiConsole.MarkupLine($"[bold]•[/] {Markup.Escape(line)}");
         foreach (var line in report.Durations()) AnsiConsole.MarkupLine($"[grey]•[/] {Markup.Escape(line)}");
+
+        foreach (var a in report.Advice())
+        {
+            AnsiConsole.WriteLine();
+            AnsiConsole.Write(new Rule("[orange1]Best adjustment[/]").LeftJustified());
+            AnsiConsole.MarkupLine($"[bold]{Markup.Escape(report.AdviceHeadline(a))}[/]");
+            foreach (var line in report.AdviceDetails(a)) AnsiConsole.MarkupLine($"[grey]•[/] {Markup.Escape(line)}");
+            var t = new Table().Border(TableBorder.Rounded).BorderColor(Color.Grey35);
+            foreach (var c in Report.ResidualColumns) t.AddColumn(c);
+            foreach (var r in report.ResidualRows(a)) t.AddRow(r.Select(Markup.Escape).ToArray());
+            AnsiConsole.Write(t);
+            var dial = report.DialRows(a).ToList();
+            if (dial.Count > 0)
+            {
+                var d = new Table().Border(TableBorder.Rounded).BorderColor(Color.Grey35).Title("What to set after adjusting");
+                foreach (var c in Report.DialColumns) d.AddColumn(c);
+                foreach (var r in dial) d.AddRow(r.Select(Markup.Escape).ToArray());
+                AnsiConsole.Write(d);
+            }
+        }
     }
 }

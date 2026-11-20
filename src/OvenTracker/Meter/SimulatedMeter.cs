@@ -20,6 +20,9 @@ public sealed class SimulatedOven(int seed = 1)
     public OvenMode Mode { get; private set; } = OvenMode.Bake;
     public double? SetpointC { get; private set; }
 
+    /// <summary>The thermostat adjustment (offset): it moves where the thermostat holds by this much at every setting.</summary>
+    public double AdjustmentC { get; set; }
+
     /// <summary>The thermostat's error at a setpoint: bake runs hot, more so at the top; convection runs cool.</summary>
     public static double BiasC(OvenMode mode, double setpointC) =>
         mode == OvenMode.Bake ? 4.0 + 0.04 * (setpointC - 177) : -5.0 + 0.01 * (setpointC - 177);
@@ -43,7 +46,7 @@ public sealed class SimulatedOven(int seed = 1)
             var dt = Math.Min(0.5, seconds - done);
             if (SetpointC is { } sp)
             {
-                var target = sp + BiasC(Mode, sp);
+                var target = sp + BiasC(Mode, sp) + AdjustmentC;
                 if (SensorC < target - hysteresis) HeaterOn = true;
                 else if (SensorC > target + hysteresis) HeaterOn = false;
             }
@@ -92,6 +95,7 @@ public sealed class SimulatedMeter(SimulatedOven oven, double intervalSeconds) :
 
     public double? ReadBatteryPercent() => 81.4;
     public void SetOven(OvenMode mode, double? setpointC) => oven.Set(mode, setpointC);
+    public void SetAdjustment(double adjustmentC) => oven.AdjustmentC = adjustmentC;
     public void Dispose() { }
 }
 
