@@ -1,13 +1,26 @@
 using System.ComponentModel;
 using OvenTracker.Analysis;
+using OvenTracker.Meter;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
 namespace OvenTracker.Commands;
 
-/// <summary>The options about the oven's thermostat adjustment, shared by <c>run</c> and <c>analyze</c>.</summary>
-public abstract class AdjustmentSettings : CommandSettings
+/// <summary>The options shared by <c>run</c> and <c>analyze</c>: the oven's thermostat adjustment, and the probe.</summary>
+public abstract class SharedSettings : CommandSettings
 {
+    [CommandOption("--probe <NAME>")]
+    [Description("The probe in use, so the report uses its tolerance and range: type-k (standard limits, the default for a type K meter), type-k-special, or 80bk-a (Fluke 80BK-A).")]
+    public string? Probe { get; set; }
+
+    [CommandOption("--probe-tolerance <SPEC>")]
+    [Description("A probe's tolerance from its datasheet: the greater of degrees and a percentage, e.g. 2.2C,2% or 4F,2% (or 0.3C+0.5% for the two added). Without C or F, in the oven's unit.")]
+    public string? ProbeTolerance { get; set; }
+
+    [CommandOption("--probe-max <TEMP>")]
+    [Description("The highest temperature the probe is rated for, e.g. 260C or 500F. The app warns before a run if a setpoint would take it past that.")]
+    public string? ProbeMax { get; set; }
+
     [CommandOption("--adjustment <DEG>")]
     [Description("The oven's thermostat adjustment (offset) setting during the run, in the oven's unit, e.g. -10. Recorded, so the app can say what to set it to, and can measure how far the adjustment moves the oven from runs at different settings.")]
     public double? Adjustment { get; set; }
@@ -57,6 +70,10 @@ public abstract class AdjustmentSettings : CommandSettings
         if (AdjustStep is <= 0) return ValidationResult.Error("--adjust-step must be positive.");
         if (AdjustRange is <= 0) return ValidationResult.Error("--adjust-range must be positive.");
         if (Favour is <= 0) return ValidationResult.Error("--favour must be a temperature, e.g. 350.");
+        if (Probe is not null && Probes.Find(Probe) is null) return ValidationResult.Error($"--probe must be one of: {Probes.Keys}. For another, give --probe-tolerance (and --probe-max).");
+        if (ProbeTolerance is not null && Probes.ParseTolerance(ProbeTolerance, TempUnit.Celsius) is null)
+            return ValidationResult.Error("--probe-tolerance must look like 2.2C,2% (the greater of ±2.2 °C and ±2 %) or 0.3C+0.5% (the two added).");
+        if (ProbeMax is not null && Probes.ParseTemperature(ProbeMax, TempUnit.Celsius) is null) return ValidationResult.Error("--probe-max must be a temperature, e.g. 260C or 500F.");
         return ValidationResult.Success();
     }
 
@@ -73,6 +90,13 @@ public abstract class AdjustmentSettings : CommandSettings
         if (SeparateAdjustments) o = o with { SharedAcrossModes = false };
         return o;
     }
+
+    /// <summary>Whether any probe option was given.</summary>
+    public bool GivesProbe => Probe is not null || ProbeTolerance is not null || ProbeMax is not null;
+
+    /// <summary>The sensor for the report: the probe given, over what the meter (or the saved run) says.</summary>
+    public Sensor? ResolveSensor(Sensor? reported, TempUnit unit) =>
+        GivesProbe ? Probes.Resolve(reported, Probe, ProbeTolerance, ProbeMax, unit) : reported;
 
     /// <summary>The adjustment given, in °C.</summary>
     public double? AdjustmentC(TempUnit unit) => Adjustment is { } a ? new UnitFormatter(unit).DeltaFromDisplay(a) : null;

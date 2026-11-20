@@ -318,12 +318,33 @@ public sealed class Report(SessionInfo info, IReadOnlyList<PointResult> results)
         var top = results.Count > 0 ? results.Max(r => r.Point.SetpointC) : 200;
         sb.AppendLine($"- {SensorAccuracy(top)}");
         foreach (var line in Gaps()) sb.AppendLine($"- {line}");
+        if (ProbeRange() is { } range) sb.AppendLine($"- {range}");
         sb.AppendLine("- The probe measures the air where you put it. Ovens are hotter near the elements and walls, so keep it in the centre for every run if you want to compare runs.");
         sb.AppendLine("- If your oven converts convection temperatures down automatically (often by 25 °F / 15 °C), the convection setting entered here should be the one the oven actually targets.");
         sb.AppendLine();
         sb.AppendLine($"Settings: precision ±{f.Span(info.Options.PrecisionC)}, at least {info.Options.MinCycles} cycles, up to {info.Options.MaxPointMinutes:F0} min per setpoint. " +
                       $"Oven's thermostat adjustment during the run: {(info.AdjustmentC is { } adj ? Adjustment(adj) : "not recorded")}. Raw data: `readings.csv`.");
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// How close the readings came to the probe's rated maximum, when it's known and they came within the
+    /// oven's peak (25 °F) of it, or past it. Null otherwise.
+    /// </summary>
+    public string? ProbeRange()
+    {
+        if (info.Sensor?.MaxC is not { } max || results.Count == 0) return null;
+        double? highest = null;
+        foreach (var m in results.Select(r => r.Metrics))
+        {
+            var peak = m.OvershootC is { } os ? m.SetpointC + os : (double?)null;
+            foreach (var v in new[] { m.MaxC, peak })
+                if (v is { } x) highest = highest is { } h ? Math.Max(h, x) : x;
+        }
+        if (highest is not { } top || top < max - Commands.RunCommand.PeakAboveSetpointC) return null;
+        return top > max
+            ? $"The {info.Sensor.Name} is rated to {f.T(max, 0)}, but the readings reached {f.T(top, 0)}: those above its rating can't be trusted, and the probe may be damaged."
+            : $"The {info.Sensor.Name} is rated to {f.T(max, 0)}; the readings reached {f.T(top, 0)}, close to that.";
     }
 
     /// <summary>A gap in the readings longer than this (a minute) is worth mentioning.</summary>
@@ -345,7 +366,7 @@ public sealed class Report(SessionInfo info, IReadOnlyList<PointResult> results)
         var limit = s.LimitsAdd
             ? $"±{f.Span(s.LimitC)} plus {(s.LimitFraction * 100).ToString("0.###", Inv)} % of the temperature"
             : $"the greater of ±{f.Span(s.LimitC)} and ±{(s.LimitFraction * 100).ToString("0.###", Inv)} % of the temperature";
-        return start + $"The probe itself adds its own: a standard-grade {s.Name} is good to {limit}, ±{f.Span(s.ToleranceC(topC))} at {f.Setpoint(topC)}, " +
+        return start + $"The probe itself adds its own: {(s.IsGenericType ? $"a standard-grade {s.Name}" : $"the {s.Name}")} is good to {limit}, ±{f.Span(s.ToleranceC(topC))} at {f.Setpoint(topC)}, " +
                "and the meter's own accuracy (in its data sheet) adds to that. " + end;
     }
 

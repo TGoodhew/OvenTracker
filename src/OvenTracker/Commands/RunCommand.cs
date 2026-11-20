@@ -10,7 +10,7 @@ using Spectre.Console.Cli;
 
 namespace OvenTracker.Commands;
 
-public sealed class RunSettings : AdjustmentSettings
+public sealed class RunSettings : SharedSettings
 {
     [CommandOption("--meter <DRIVER>")]
     [Description("Which kind of meter: u1253b (the default) or simulated. [bold]oventracker meters[/] lists them and what each can see.")]
@@ -349,6 +349,12 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
         if (!s.Grouped && modes.Count > 1)
             AnsiConsole.MarkupLine("[grey]The modes alternate at each setpoint, so the oven only ever heats up between them and bake and convection are compared under the same conditions.[/]");
 
+        // The probe: the one given, or what the meter (or the saved run) says. Warn about setpoints near its rating.
+        var sensor = s.ResolveSensor(resumed?.Info.Sensor ?? config?.Sensor, unit);
+        if (ProbeRangeWarning(sensor, todo.Select(p => p.SetpointC), f) is { } rangeWarning)
+            AnsiConsole.Write(new Panel(new Markup(rangeWarning.Text)).Header(rangeWarning.Over ? "[red]Probe rating[/]" : "[yellow]Probe rating[/]")
+                .Border(BoxBorder.Rounded).BorderColor(rangeWarning.Over ? Color.Red : Color.Yellow));
+
         // A warm oven at the start of a new session: the first setpoint is meant to start from cold.
         var startsWarmC = resumed is null && first.Celsius is { } warmC && todo.Count > 0
                           && warmC > ResetWaiter.TargetFor(plan, todo[0], ambientC ?? AssumedAmbientC) ? warmC : (double?)null;
@@ -379,6 +385,7 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
                 AdjustmentC = adjustmentC,
                 Adjust = s.BuildOptions(unit, resumed.Info.Adjust),
                 AmbientC = ambientC,
+                Sensor = sensor,
                 Sittings = [.. resumed.Info.Sittings ?? [resumed.Info.Started], startedAt],
             };
         }
@@ -386,7 +393,7 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
         {
             outDir = s.Out ?? Path.Combine(RunsFolder(), DateTime.Now.ToString("yyyy-MM-dd HHmm", Inv));
             info = new SessionInfo(Version, startedAt, $"{identity.Manufacturer} {identity.Model}", meter.Location, unit, toleranceC, options, plan,
-                driver.Name, identity, config?.Sensor, adjustmentC, s.BuildOptions(unit), ambientC, [startedAt]);
+                driver.Name, identity, sensor, adjustmentC, s.BuildOptions(unit), ambientC, [startedAt]);
         }
         using var recorder = new RunRecorder(outDir, info, append: resumed is not null);
         if (resumed is not null) recorder.Note(DateTimeOffset.UtcNow, "resume");
@@ -395,7 +402,7 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
 
         var results = new List<PointResult>(done);
         var meterLabel = driver.IsSimulation ? "simulated meter" : $"{identity.Model} on {meter.Location}";
-        var tracker = new PointTracker(poller, recorder, f, options, toleranceC, meterLabel, driver.NotTemperatureHelp, plan.Count, driver.IsSimulation, driver.AutoPowerOff);
+        var tracker = new PointTracker(poller, recorder, f, options, toleranceC, meterLabel, driver.NotTemperatureHelp, plan.Count, driver.IsSimulation, driver.AutoPowerOff, sensor?.MaxC);
         var waiter = new ResetWaiter(poller, recorder, f, ambientC ?? AssumedAmbientC, ambientC is null, driver.IsSimulation, driver.AutoPowerOff);
         var afterReset = resumed is not null; // the first setpoint of a resumed run follows a break
         var stopped = false;
@@ -581,6 +588,28 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
                     return true;
             }
         }
+    }
+
+    /// <summary>
+    /// How far above a setpoint the oven goes: its first peak and the thermostat's swing (25 °F). A setpoint
+    /// within this of the probe's maximum may take the probe past its rating.
+    /// </summary>
+    public const double PeakAboveSetpointC = 25 / 1.8;
+
+    /// <summary>A warning, in Spectre markup, if any setpoint is above the probe's rating or within its peak of it; null if none.</summary>
+    public static (string Text, bool Over)? ProbeRangeWarning(Sensor? sensor, IEnumerable<double> setpointsC, UnitFormatter f)
+    {
+        if (sensor?.MaxC is not { } max) return null;
+        var sps = setpointsC.Distinct().Order().ToList();
+        var over = sps.Where(sp => sp > max).ToList();
+        var near = sps.Where(sp => sp <= max && sp + PeakAboveSetpointC > max).ToList();
+        if (over.Count == 0 && near.Count == 0) return null;
+        var lines = new List<string> { $"The {Markup.Escape(sensor.Name)} is rated to {Markup.Escape(f.T(max, 0))}." };
+        if (over.Count > 0)
+            lines.Add($"[red]{Markup.Escape(string.Join(", ", over.Select(f.Setpoint)))} {(over.Count == 1 ? "is" : "are")} above that: the probe may be damaged, and its readings can't be trusted.[/] Leave {(over.Count == 1 ? "it" : "them")} out, or use a probe rated higher.");
+        if (near.Count > 0)
+            lines.Add($"At {Markup.Escape(string.Join(", ", near.Select(f.Setpoint)))}, the oven's first peak and thermostat swing (about {Markup.Escape(f.Span(PeakAboveSetpointC, 0))}) may take the probe past it. The app will say if a reading does.");
+        return (string.Join("\n", lines), over.Count > 0);
     }
 
     /// <summary>Room temperature to assume when it wasn't measured or given: 70 °F.</summary>

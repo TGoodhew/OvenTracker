@@ -21,7 +21,8 @@ public sealed class PointTracker(
     string notTemperatureHint,
     int pointCount,
     bool fast,
-    AutoPowerOff? autoPowerOff = null)
+    AutoPowerOff? autoPowerOff = null,
+    double? probeMaxC = null)
 {
     /// <param name="startingFromC">Where the oven was before this setpoint, so the app can check it heads for the new setting.</param>
     /// <param name="swingC">The thermostat's swing at the setpoint before, if measured.</param>
@@ -99,7 +100,8 @@ public sealed class PointTracker(
                     break;
             }
             alert = silence.Silent ? SilenceWatch.Message(poller.SilentFor, autoPowerOff)
-                : heading is { State: HeadingState.NotHeading } h ? NotHeadingMessage(h, format) : null;
+                : heading is { State: HeadingState.NotHeading } h ? NotHeadingMessage(h, format)
+                : probeMaxC is { } max && analyzer.LatestC is { } latest && latest > max ? OverRatingMessage(latest, max, format) : null;
 
             if (ct.IsCancellationRequested)
             {
@@ -240,6 +242,10 @@ public sealed class PointTracker(
         if (BatteryText.Plain(batteryPercent) is { } battery) parts.Add(battery);
         return string.Join("  ·  ", parts);
     }
+
+    /// <summary>What to say when the probe reads above its rating.</summary>
+    public static string OverRatingMessage(double readingC, double maxC, UnitFormatter f) =>
+        $"The probe reads {f.T(readingC, 0)}, above its rated {f.T(maxC, 0)}: it may be damaged, and readings this hot can't be trusted. Lower the setting.";
 
     /// <summary>What to say when the oven isn't heading for its new setting.</summary>
     public static string NotHeadingMessage(HeadingCheck h, UnitFormatter f) =>
