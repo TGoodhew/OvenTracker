@@ -226,7 +226,15 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
         }
         var oven = meter as IOvenSimulation;
         if (s.SimApo is { } simApo) oven?.SetAutoPowerOff(TimeSpan.FromMinutes(simApo));
-        if (!await CheckAutoPowerOffAsync(driver, meter, identity, appSettings, s.Yes, ct)) { meter.Dispose(); return 0; }
+        // Prompts need a terminal; without one (output to a file or pipe), the run goes on as with --yes.
+        var interactive = ConsoleCaps.Live;
+        if (!interactive && MissingWithoutTerminal(s) is { } missing)
+        {
+            AnsiConsole.MarkupLine($"[red]The output isn't a terminal, so the app can't ask: give {Markup.Escape(missing)}.[/]");
+            meter.Dispose();
+            return 1;
+        }
+        if (!await CheckAutoPowerOffAsync(driver, meter, identity, appSettings, s.Yes || !interactive, ct)) { meter.Dispose(); return 0; }
         var first = meter.Read();
         if (first.Status == ReadingStatus.Overload)
             AnsiConsole.MarkupLine("[yellow]The meter reads OL: the probe isn't connected (or is broken).[/]");
@@ -280,7 +288,7 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
 
         // The oven's thermostat adjustment now, so the report can say what to set it to.
         var adjustmentC = s.AdjustmentC(unit) ?? resumed?.Info.AdjustmentC;
-        if (adjustmentC is null && !driver.IsSimulation && !s.Yes)
+        if (adjustmentC is null && !driver.IsSimulation && !s.Yes && interactive)
         {
             var answer = await new TextPrompt<string>($"What is the oven's thermostat adjustment set to now, in {f.Symbol}? [grey](0 if it has never been changed; Enter if you don't know)[/]")
                 .AllowEmpty()
@@ -358,7 +366,7 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
                 .Header("[yellow]Warm oven[/]").Border(BoxBorder.Rounded).BorderColor(Color.Yellow));
         }
 
-        if (!s.Yes && !await new ConfirmationPrompt("Ready to start?").ShowAsync(AnsiConsole.Console, ct)) return 0;
+        if (!s.Yes && interactive && !await new ConfirmationPrompt("Ready to start?").ShowAsync(AnsiConsole.Console, ct)) return 0;
 
         var startedAt = DateTimeOffset.Now;
         string outDir;
@@ -391,6 +399,7 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
         var waiter = new ResetWaiter(poller, recorder, f, ambientC ?? AssumedAmbientC, ambientC is null, driver.IsSimulation, driver.AutoPowerOff);
         var afterReset = resumed is not null; // the first setpoint of a resumed run follows a break
         var stopped = false;
+        Exception? failure = null;
         var prompt = new ChangePrompt(poller, recorder, f, TimeSpan.FromMinutes(s.Remind));
         var ask = ChangePrompt.ShouldAsk(s.Yes, driver.IsSimulation, !Console.IsInputRedirected);
         string? lastDone = null; // what was just finished, for the prompt
@@ -450,7 +459,7 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
                 results.RemoveAll(r => r.Point.Index == point.Index);
                 results.Add(result);
                 poller.Enqueue(m => m.Beep());
-                AnsiConsole.Write("\a");
+                ConsoleCaps.Bell();
                 ConsoleReport.PointSummary(new Report(info, results), result);
                 lastDone = Done(new Report(info, results), result);
                 previous = result.Metrics.MeanC is not null ? result : null;
@@ -464,6 +473,12 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
         catch (OperationCanceledException)
         {
             AnsiConsole.MarkupLine("[yellow]Stopped.[/]");
+        }
+        catch (Exception ex)
+        {
+            // Whatever went wrong, the setpoints already measured are written up below.
+            failure = ex;
+            AnsiConsole.MarkupLine($"[red]The session stopped with an error: {Markup.Escape(ex.Message)}[/]");
         }
         finally
         {
@@ -484,7 +499,23 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
         if (left > 0)
             AnsiConsole.MarkupLine($"{left} setpoint{(left == 1 ? "" : "s")} still to do. To carry on later, even after using the oven: [bold]oventracker run --resume \"{Markup.Escape(outDir)}\"[/]");
         AnsiConsole.MarkupLine("[grey]Turn the oven off.[/]");
+        if (failure is not null)
+        {
+            AnsiConsole.MarkupLine($"[red]Stopped by an error ({Markup.Escape(failure.GetType().Name)}: {Markup.Escape(failure.Message)}). The setpoints before it are saved.[/]");
+            return 1;
+        }
         return 0;
+    }
+
+    /// <summary>Without a terminal nothing can be asked, so a new run needs these given. Null if nothing is missing.</summary>
+    static string? MissingWithoutTerminal(RunSettings s)
+    {
+        if (s.Resume is not null) return null;
+        var missing = new List<string>();
+        if (s.Unit is null) missing.Add("--unit");
+        if (s.Modes is null) missing.Add("--modes");
+        if (s.Setpoints is null) missing.Add("--setpoints");
+        return missing.Count == 0 ? null : string.Join(", ", missing);
     }
 
     /// <summary>

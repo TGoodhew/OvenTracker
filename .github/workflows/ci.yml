@@ -49,10 +49,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "--version failed ($LASTEXITCODE)" }
           & $app meters
           if ($LASTEXITCODE -ne 0) { throw "meters failed ($LASTEXITCODE)" }
-          # The live display needs a terminal: script gives it one.
-          script -qec "$app run --simulate --speed 3000 -y --unit F --modes bake,convection --setpoints 350 --out run" /dev/null
-          if ($LASTEXITCODE -ne 0) { throw "the simulated session failed ($LASTEXITCODE)" }
+          # A whole simulated session with its output to a log file, as with nohup or tee: no terminal, so
+          # progress lines instead of the live display.
+          & $app run --simulate --speed 3000 -y --unit F --modes bake,convection --setpoints 350 --out run *> run.log
+          if ($LASTEXITCODE -ne 0) { Get-Content run.log; throw "the simulated session failed ($LASTEXITCODE)" }
           foreach ($f in 'report.md', 'results.json', 'readings.csv', 'session.json') {
-            if (-not (Test-Path "run/$f")) { throw "the simulated session wrote no $f" }
+            if (-not (Test-Path "run/$f")) { Get-Content run.log; throw "the simulated session wrote no $f" }
           }
+          if (Select-String -Path run.log -Pattern "`e\[" -Quiet) { throw "the log has terminal control codes in it" }
+          Get-Content run.log | Select-Object -Last 15
           Get-Content run/report.md -TotalCount 12

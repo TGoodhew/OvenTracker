@@ -52,10 +52,19 @@ public sealed class ResetWaiter(MeterPoller poller, RunRecorder recorder, UnitFo
         var ready = false;
         var outcome = ResetOutcome.Ready;
         var canReadKeys = !Console.IsInputRedirected;
+        autoCarryOn |= !canReadKeys; // nobody can press C
         string? notice = null;
 
         recorder.Note(now, "reset-start");
         IRenderable Render() => View(model, next, cold, ready, start is { } s ? now - s : TimeSpan.Zero, notice, autoCarryOn);
+
+        if (!ConsoleCaps.Live)
+        {
+            outcome = await RunPlainAsync();
+            AnsiConsole.WriteLine();
+            recorder.Note(now, $"reset-end:{outcome}");
+            return outcome;
+        }
 
         if (canReadKeys) Console.Write("\u001b[H\u001b[2J");
         await AnsiConsole.Live(Render())
@@ -78,7 +87,7 @@ public sealed class ResetWaiter(MeterPoller poller, RunRecorder recorder, UnitFo
                     {
                         ready = true;
                         poller.Enqueue(m => m.Beep());
-                        AnsiConsole.Write("\a");
+                        ConsoleCaps.Bell();
                         if (autoCarryOn) break;
                     }
 
@@ -101,6 +110,50 @@ public sealed class ResetWaiter(MeterPoller poller, RunRecorder recorder, UnitFo
         AnsiConsole.WriteLine();
         recorder.Note(now, $"reset-end:{outcome}");
         return outcome;
+
+        // Without a live display: a line each minute, and when the oven's state changes.
+        async Task<ResetOutcome> RunPlainAsync()
+        {
+            AnsiConsole.MarkupLine($"[bold]Oven reset:[/] waiting until the oven is below {Markup.Escape(f.T(next.TargetC, 0))} for {Markup.Escape(next.Label)}." +
+                                   (canReadKeys ? " [grey]C carry on now · Q stop here[/]" : ""));
+            var lastLine = DateTimeOffset.MinValue;
+            var lastState = (CoolingState?)null;
+            while (true)
+            {
+                while (poller.Readings.TryRead(out var r))
+                {
+                    recorder.Reading(r, null, null);
+                    now = r.Time;
+                    start ??= r.Time;
+                    if (r is { Status: Meter.ReadingStatus.Ok, Celsius: { } c }) model.Add((r.Time - start.Value).TotalSeconds, c);
+                }
+                if (model.CurrentC is { } current && current <= next.TargetC)
+                {
+                    poller.Enqueue(m => m.Beep());
+                    ConsoleCaps.Bell();
+                    AnsiConsole.WriteLine($"The oven is ready for {next.Label} ({f.T(current, 0)}).");
+                    if (autoCarryOn) return ResetOutcome.Ready;
+                    ready = true;
+                }
+                if (ct.IsCancellationRequested) return ResetOutcome.Quit;
+                while (canReadKeys && Console.KeyAvailable)
+                {
+                    var key = char.ToUpperInvariant(Console.ReadKey(intercept: true).KeyChar);
+                    if (key is 'C' or '\r') return ready ? ResetOutcome.Ready : ResetOutcome.CarryOn;
+                    if (key == 'Q') return ResetOutcome.Quit;
+                }
+                if (model.CurrentC is { } shown && (DateTimeOffset.UtcNow - lastLine >= TimeSpan.FromMinutes(1) || model.State != lastState))
+                {
+                    var eta = model.TimeUntil(next.TargetC) is { } e ? $"ready in about {Minutes(e.TotalMinutes)}" : "learning how fast it cools";
+                    var coldEta = model.TimeUntil(cold.TargetC) is { } ce ? $"; cold in about {Minutes(ce.TotalMinutes)}" : "";
+                    var silent = poller.SilentFor >= SilenceWatch.DefaultThreshold ? $"  {SilenceWatch.Message(poller.SilentFor, autoPowerOff)}" : "";
+                    AnsiConsole.WriteLine($"{f.T(shown, 0)}, {model.State.ToString().ToLowerInvariant()}: {eta}{coldEta}.{silent}");
+                    lastLine = DateTimeOffset.UtcNow;
+                    lastState = model.State;
+                }
+                try { await Task.Delay(fast ? 100 : 500, ct); } catch (OperationCanceledException) { }
+            }
+        }
     }
 
     IRenderable View(CoolingModel m, ResetTarget next, ResetTarget cold, bool ready, TimeSpan watched, string? notice, bool autoCarryOn)

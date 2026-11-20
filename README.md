@@ -108,6 +108,21 @@ with how to wake it ("press any button on the meter, or turn the dial"), and the
 carries on as soon as readings come back. The gap is recorded in `readings.csv`, and the report notes any
 setpoint with a gap of a minute or more.
 
+### Logging a run
+
+A session takes hours, so you may want it in the background or logged, e.g. over SSH on a Raspberry Pi:
+
+```sh
+./OvenTracker run --unit F --modes bake,convection --setpoints 350,400 | tee oven.log
+```
+
+When the output isn't a terminal (a file, a pipe, `nohup`), the app writes a plain progress line each minute
+instead of the live display: elapsed time, temperature, phase, mean so far and time left. Alerts and notices
+get lines of their own. It can't ask questions on a screen, so give `--unit`, `--modes` and `--setpoints`. If
+the keyboard is still connected (as with `| tee`), the prompt between setpoints still waits for **Enter**.
+If anything goes wrong mid-run, the setpoints already measured are still written to `report.md` and
+`results.json`, and the app exits with code 1.
+
 ### Splitting a session (oven reset)
 
 A full session takes hours, but it doesn't have to be done in one go. Stop after any setpoint (*Finish the

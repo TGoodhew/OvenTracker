@@ -72,6 +72,31 @@ public sealed class ChangePrompt(MeterPoller poller, RunRecorder recorder, UnitF
             return new Panel(new Rows(rows)).Border(BoxBorder.Double).BorderColor(Color.Orange1).Expand();
         }
 
+        if (!ConsoleCaps.Live)
+        {
+            // Output to a file or pipe, with a keyboard still there: say it in plain lines, and wait.
+            if (done is not null) AnsiConsole.WriteLine(done);
+            AnsiConsole.MarkupLine($"[bold]>>> {Markup.Escape(heading)} {Markup.Escape(string.Join(" ", big))}[/]");
+            AnsiConsole.MarkupLine(keys);
+            while (!ct.IsCancellationRequested && choice is null)
+            {
+                while (Console.KeyAvailable && choice is null)
+                    choice = choose(char.ToUpperInvariant(Console.ReadKey(intercept: true).KeyChar));
+                if (choice is not null) break;
+                var due = RemindersDue(DateTimeOffset.UtcNow - started, remindEvery);
+                if (due > reminded)
+                {
+                    reminded = due;
+                    poller.Enqueue(m => m.Beep());
+                    ConsoleCaps.Bell();
+                    AnsiConsole.MarkupLine($"[yellow]Still waiting ({Markup.Escape(Waited(DateTimeOffset.UtcNow - started))}): {Markup.Escape(heading)} {Markup.Escape(string.Join(" ", big))}[/]");
+                }
+                try { await Task.Delay(250, ct); } catch (OperationCanceledException) { }
+            }
+            recorder.Note(DateTimeOffset.UtcNow, $"answered:{choice}:{(DateTimeOffset.UtcNow - started).TotalSeconds.ToString("F0", Inv)}s");
+            return choice;
+        }
+
         Console.Write("\u001b[H\u001b[2J");
         await AnsiConsole.Live(Render()).AutoClear(false).StartAsync(async ctx =>
         {
@@ -86,7 +111,7 @@ public sealed class ChangePrompt(MeterPoller poller, RunRecorder recorder, UnitF
                 {
                     reminded = due;
                     poller.Enqueue(m => m.Beep());
-                    Console.Write("\a");
+                    ConsoleCaps.Bell();
                 }
                 ctx.UpdateTarget(Render());
                 try { await Task.Delay(250, ct); } catch (OperationCanceledException) { }
