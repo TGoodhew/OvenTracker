@@ -16,6 +16,7 @@ namespace OvenTracker.Session;
 /// <param name="AmbientC">Room temperature: the probe's first reading, when the oven was cold, or as given.</param>
 /// <param name="Sittings">When each sitting started: the first, then each resume.</param>
 /// <param name="Oven">The oven's profile, as it was for this run.</param>
+/// <param name="Characterise">For a characterise run: its step, and the adjustment phase 2 moved to.</param>
 public sealed record SessionInfo(
     string AppVersion,
     DateTimeOffset Started,
@@ -32,7 +33,8 @@ public sealed record SessionInfo(
     AdjustmentOptions? Adjust = null,
     double? AmbientC = null,
     IReadOnlyList<DateTimeOffset>? Sittings = null,
-    Ovens.OvenProfile? Oven = null);
+    Ovens.OvenProfile? Oven = null,
+    CharacteriseInfo? Characterise = null);
 
 public static class Json
 {
@@ -93,6 +95,10 @@ public sealed class RunRecorder : IDisposable
         csv.WriteLine(string.Join(',',
             time.UtcDateTime.ToString("O", Inv), point.Index.ToString(Inv), point.Mode.ToString(),
             point.SetpointC.ToString("F3", Inv), elapsed.ToString("F1", Inv), "Event", "", "", name));
+
+    /// <summary>Rewrites session.json, e.g. when characterise adds its second phase to the plan.</summary>
+    public void UpdateSession(SessionInfo info) =>
+        File.WriteAllText(Path.Combine(Directory, "session.json"), JsonSerializer.Serialize(info, Json.Options));
 
     public void WriteResults(SessionInfo info, IReadOnlyList<PointResult> results, string markdown)
     {

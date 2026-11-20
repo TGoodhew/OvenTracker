@@ -26,6 +26,10 @@ public sealed class AnalyzeSettings : SharedSettings
     [CommandOption("--min-cycles <N>")]
     public int? MinCycles { get; set; }
 
+    [CommandOption("--save-gains")]
+    [Description("Save the gains measured by these runs (the same setpoints at different adjustments) to the oven's profile (--oven), so later runs use them.")]
+    public bool SaveGains { get; set; }
+
     public override ValidationResult Validate()
     {
         if (base.Validate() is { Successful: false } adjustment) return adjustment;
@@ -70,7 +74,10 @@ public sealed class AnalyzeCommand : Command<AnalyzeSettings>
         if (runs.Count == 1)
         {
             var only = runs[0].Info with { AdjustmentC = adjustmentC ?? runs[0].Info.AdjustmentC };
-            return (only, Replay.Analyze(runs[0].Csv, options(only)));
+            // Points keep the plan's adjustment (a characterise run has two).
+            var replayed = Replay.Analyze(runs[0].Csv, options(only))
+                .Select(r => r with { Point = only.Plan.FirstOrDefault(p => p.Index == r.Point.Index) ?? r.Point }).ToList();
+            return (only, replayed);
         }
 
         var ordered = runs.OrderBy(r => r.Info.Started).ToList();
@@ -124,6 +131,17 @@ public sealed class AnalyzeCommand : Command<AnalyzeSettings>
         var output = Path.Combine(latest, runs.Count == 1 ? "report-reanalysed.md" : "report-combined.md");
         File.WriteAllText(output, report.Markdown());
         AnsiConsole.MarkupLine($"\nWrote {Markup.Escape(output)}.");
+
+        if (s.SaveGains || info.Characterise is { ChangedToC: not null })
+        {
+            var oven = info.Oven ?? OvenProfiles.Default;
+            if (s.SaveGains && oven.IsGeneric)
+            {
+                AnsiConsole.MarkupLine("[red]--save-gains needs the oven: give --oven <key> (docs/adding-an-oven.md).[/]");
+                return 1;
+            }
+            RunCommand.SaveCharacterisation(info, results, latest, oven, save: s.SaveGains);
+        }
         return 0;
     }
 }

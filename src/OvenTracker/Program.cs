@@ -24,6 +24,10 @@ app.Configure(config =>
         .WithExample("run", "--unit", "F", "--modes", "bake,convection", "--setpoints", "350,400,450")
         .WithExample("run", "--meter", "u1253b", "--resource", "COM5")
         .WithExample("run", "--simulate", "--speed", "120");
+    config.AddCommand<CharacteriseCommand>("characterise")
+        .WithAlias("characterize")
+        .WithDescription("Measure how the oven's adjustment moves it: every setpoint, then (after you change the adjustment) the lowest and highest again. Saves the gains to the oven's profile.")
+        .WithExample("characterise", "--oven", "ge-phs925", "--unit", "F", "--modes", "bake,convection", "--setpoints", "325,375,425");
     config.AddCommand<OvensCommand>("ovens")
         .WithDescription("List the ovens the app knows (built in, and described in files), or show one in full.")
         .WithExample("ovens", "--show", "ge-phs925");

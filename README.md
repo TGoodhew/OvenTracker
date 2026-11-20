@@ -211,8 +211,24 @@ oven's own steps (1 °F, up to ±35 °F, by default). Tell the app the oven's cu
 or `--adjustment`), and the report says what to set it to. When the error changes with temperature, no
 single setting fixes it all, so the report also shows what's left at each setpoint and what to set to make
 up for it. `--objective minimax` keeps the worst setpoint as close as it can, and `--favour 350` makes the
-oven right at 350 °F. Runs of the same setpoints at two different adjustments, analysed together, measure
-how far the adjustment really moves the oven. [How the oven's control responds to its
+oven right at 350 °F.
+
+How far the adjustment really moves the oven differs from oven to oven, and the app assumes 1:1 until it's
+measured. `characterise` measures it, for any oven, in one (resumable) session:
+
+```powershell
+OvenTracker characterise --oven ge-phs925 --unit F --modes bake,convection --setpoints 325,375,425
+```
+
+It runs each setpoint, asks you to change the adjustment (using your oven profile's steps), and runs the
+highest and lowest again. Then it writes `characterisation.md` with:
+- each mode's gain;
+- how the error changes with temperature;
+- repeatability;
+- the best adjustment.
+
+It saves the gains to the oven's profile, so later recommendations use them. `analyze --save-gains` does the
+same from runs you've already made at two adjustments. [How the oven's control responds to its
 adjustment](docs/oven-control-model.md) explains the method.
 
 ## Other meters

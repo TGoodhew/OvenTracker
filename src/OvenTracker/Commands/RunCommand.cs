@@ -11,7 +11,7 @@ using Spectre.Console.Cli;
 
 namespace OvenTracker.Commands;
 
-public sealed class RunSettings : SharedSettings
+public class RunSettings : SharedSettings
 {
     [CommandOption("--meter <DRIVER>")]
     [Description("Which kind of meter: u1253b (the default) or simulated. [bold]oventracker meters[/] lists them and what each can see.")]
@@ -315,12 +315,17 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
         // Room temperature, for knowing when the oven is cold again: given, saved, or the first reading if the oven was cold.
         var ambientC = s.Ambient is { } amb ? f.FromDisplay(amb) : resumed?.Info.AmbientC ?? (first.Celsius is < 45 and > -10 ? first.Celsius : null);
 
-        // What's already done, when resuming: the setpoints that finished (by themselves or by choice).
+        // Characterise: phase 1's points are measured at the current adjustment (0 when it isn't known: the gain needs only the change).
+        var characterising = s is CharacteriseSettings || resumed?.Info.Characterise is not null;
+        if (resumed is null && s is CharacteriseSettings) plan = [.. plan.Select(p => p with { AdjustmentC = adjustmentC ?? 0 })];
+
+        // What's already done, when resuming: the setpoints that finished (by themselves or by choice), with the plan's adjustment for each.
         var done = resumed is null ? [] : Replay.Analyze(resumed.Csv, options)
             .Where(r => r.Metrics.Reason is CompletionReason.Converged or CompletionReason.TimedOut or CompletionReason.Manual)
+            .Select(r => r with { Point = plan.FirstOrDefault(p => p.Index == r.Point.Index) ?? r.Point })
             .ToList();
         var todo = plan.Where(p => done.All(d => d.Point.Index != p.Index)).ToList();
-        if (resumed is not null && todo.Count == 0)
+        if (resumed is not null && todo.Count == 0 && resumed.Info.Characterise is not { ChangedToC: null })
         {
             AnsiConsole.MarkupLine($"[green]Every setpoint in {Markup.Escape(resumed.Folder)} is already done.[/] [bold]oventracker analyze[/] re-reads it.");
             meter.Dispose();
@@ -399,7 +404,8 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
         {
             outDir = s.Out ?? Path.Combine(RunsFolder(), DateTime.Now.ToString("yyyy-MM-dd HHmm", Inv));
             info = new SessionInfo(Version, startedAt, $"{identity.Manufacturer} {identity.Model}", meter.Location, unit, toleranceC, options, plan,
-                driver.Name, identity, sensor, adjustmentC, s.BuildOptions(unit, null, ovenProfile), ambientC, [startedAt], ovenProfile);
+                driver.Name, identity, sensor, characterising ? adjustmentC ?? 0 : adjustmentC, s.BuildOptions(unit, null, ovenProfile), ambientC, [startedAt], ovenProfile,
+                s is CharacteriseSettings cs ? new CharacteriseInfo(f.DeltaFromDisplay(cs.Step), adjustmentC ?? 0) : null);
         }
         if (!driver.IsSimulation)
         {
@@ -423,20 +429,80 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
         string? lastDone = null; // what was just finished, for the prompt
         PointResult? previous = null; // the setpoint just measured in this sitting, if the oven went straight on from it
         var firstPrompt = true;
+
+        // Characterise, phase 2: change the adjustment (towards correct, by at least --step), then the lowest and
+        // highest setpoints again in each mode, highest first so the oven cools only once. False if it can't go on.
+        async Task<bool> PlanPhase2Async()
+        {
+            if (info.Characterise is not { ChangedToC: null } ch) return false;
+            var measured = results.Where(r => r.Metrics.OffsetC is not null).ToList();
+            if (measured.Count == 0) return false;
+            var adjust = new Report(info, results).AdjustOptions;
+            var from = info.AdjustmentC ?? 0;
+            var wanted = new Report(info, results).Advice().FirstOrDefault()?.ChangeC ?? 0;
+            var sign = Math.Abs(wanted) >= adjust.StepC / 2 ? Math.Sign(wanted) : measured.Average(r => r.Metrics.OffsetC!.Value) > 0 ? -1 : 1;
+            var size = Math.Round(Math.Max(ch.StepC, Math.Abs(wanted)) / adjust.StepC) * adjust.StepC;
+            var to = Math.Clamp(from + sign * size, -adjust.RangeC, adjust.RangeC);
+            if (Math.Abs(to - from) < 2 * adjust.StepC) to = Math.Clamp(from - sign * size, -adjust.RangeC, adjust.RangeC); // no room that way
+            var report = new Report(info, results);
+            var toText = report.Adjustment(to);
+
+            if (ask)
+            {
+                var steps = ovenProfile.HowToChange is { Count: > 0 } h && !ovenProfile.IsGeneric
+                    ? $" To set it on the {ovenProfile.Name}: {string.Join(" ", h.Select((x, i) => $"{i + 1}. {x}"))}"
+                    : "";
+                var doneText = $"Phase 1 is done. Now change the oven's thermostat adjustment from {report.Adjustment(from)} to {toText}, " +
+                               $"and leave it there for phase 2.{steps}";
+                if (!await prompt.AskToSetAdjustmentAsync(doneText, toText, ct))
+                {
+                    AnsiConsole.MarkupLine("[yellow]Stopped before phase 2. Carry on later with --resume: it asks for the change again.[/]");
+                    return false;
+                }
+            }
+            else if (!driver.IsSimulation)
+            {
+                AnsiConsole.MarkupLine($"[yellow]Phase 1 is done. Change the adjustment to {Markup.Escape(toText)}, then carry on with --resume.[/]");
+                return false;
+            }
+            oven?.SetAdjustment(to); // the simulated oven
+
+            var next = plan.Max(p => p.Index) + 1;
+            var phase2 = new List<TestPoint>();
+            var sps = plan.Select(p => p.SetpointC).Distinct().Order().ToList();
+            foreach (var sp in new[] { sps[^1], sps[0] }.Distinct())
+                foreach (var mode in modes)
+                    phase2.Add(new TestPoint(next++, mode, sp, to));
+            plan = [.. plan, .. phase2];
+            info = info with { Plan = plan, AdjustmentC = to, Characterise = ch with { ChangedToC = to, ChangedAt = DateTimeOffset.Now } };
+            recorder.UpdateSession(info);
+            recorder.Note(DateTimeOffset.UtcNow, $"adjustment-changed:{to.ToString("F3", Inv)}");
+            todo.AddRange(phase2);
+            previous = null;
+            lastDone = $"The adjustment is {toText} now. Phase 2: {phase2.Count} setpoints.";
+            return true;
+        }
+
         try
         {
             for (var w = 0; w < 50 && poller.LastCelsius is null; w++) await Task.Delay(100, ct); // a first reading, to know how hot the oven is
-            foreach (var point in todo)
+            var ti = 0;
+            while (true)
             {
+            for (; ti < todo.Count; ti++)
+            {
+                var point = todo[ti];
                 AnsiConsole.WriteLine();
                 AnsiConsole.Write(new Rule($"[orange1]{point.Index} of {plan.Count}: {Temp.ModeName(point.Mode)} {Markup.Escape(f.Setpoint(point.SetpointC))}[/]").LeftJustified());
                 var label = $"{Temp.ModeName(point.Mode)} {f.Setpoint(point.SetpointC)}";
                 var targetC = ResetWaiter.TargetFor(plan, point, ambientC ?? AssumedAmbientC);
                 ChangeChoice choice;
+                var hotAtPrompt = false; // how the oven was when asked, before anyone started it for this setpoint
                 while (true)
                 {
                     // Too hot to start from? Going straight on from a setpoint, the oven cycles around it, so allow half its swing.
                     var hot = poller.LastCelsius is { } nowC && nowC > targetC + (previous?.Metrics.SwingC ?? 0) / 2;
+                    hotAtPrompt = hot;
                     var waitOffer = hot ? $"wait for it to cool below {f.T(targetC, 0)} first" : null;
                     if (hot && afterReset && s.Yes) choice = ChangeChoice.Wait;   // resumed with --yes: cool first, by itself
                     else if (!ask) choice = ChangeChoice.Start;                   // the simulator with --yes, or no keyboard
@@ -465,9 +531,9 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
                 if (s.SimForget != point.Index) oven?.SetOven(point.Mode, point.SetpointC);
                 var idle = DrainIdle(poller, recorder);
                 if (afterReset) recorder.Note(DateTimeOffset.UtcNow, "reset");
-                // The first setpoint of a new session, started without letting a warm oven cool.
-                var startedWarm = resumed is null && !afterReset && point.Index == plan[0].Index
-                                  && poller.LastCelsius is { } atStart && atStart > targetC;
+                // The first setpoint of a new session, started without letting a warm oven cool. Judged by the oven when it
+                // was asked, not now: by now it may be heating for this setpoint.
+                var startedWarm = resumed is null && !afterReset && point.Index == plan[0].Index && hotAtPrompt;
                 if (startedWarm) recorder.Note(DateTimeOffset.UtcNow, "started-warm");
                 // Where the oven starts from: the setpoint just measured, if it went straight on from it, or its last two minutes.
                 var from = previous?.Metrics.MeanC ?? StartingFrom(idle, poller.LastCelsius);
@@ -482,6 +548,9 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
                 lastDone = Done(new Report(info, results), result);
                 previous = result.Metrics.MeanC is not null ? result : null;
                 if (pointOutcome == PointOutcome.Quit) { stopped = true; break; }
+            }
+            // Characterise: with phase 1 done, change the adjustment and add phase 2.
+            if (stopped || !characterising || !await PlanPhase2Async()) break;
             }
 
             // Finished (or stopped): ask for the oven to be turned off, with the same reminders.
@@ -513,6 +582,8 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
         if (results.Count > 0) ConsoleReport.Full(report);
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine($"Saved to [link]{Markup.Escape(outDir)}[/]: report.md, results.json and readings.csv.");
+        if (info.Characterise is { ChangedToC: not null })
+            SaveCharacterisation(info, results, outDir, ovenProfile, save: !driver.IsSimulation);
         var left = plan.Count(p => !results.Any(r => r.Point.Index == p.Index && r.Metrics.Reason is CompletionReason.Converged or CompletionReason.TimedOut or CompletionReason.Manual));
         if (left > 0)
             AnsiConsole.MarkupLine($"{left} setpoint{(left == 1 ? "" : "s")} still to do. To carry on later, even after using the oven: [bold]oventracker run --resume \"{Markup.Escape(outDir)}\"[/]");
@@ -523,6 +594,37 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
             return 1;
         }
         return 0;
+    }
+
+    /// <summary>
+    /// Writes characterisation.md and .json beside the run, shows them, and saves the measured gains to the oven's
+    /// profile: not for the generic profile (it stands for every oven), and not for a simulation.
+    /// </summary>
+    /// <param name="ovenFolder">Where oven profiles are saved; the usual folder when null (tests give their own).</param>
+    public static Characterisation SaveCharacterisation(SessionInfo info, IReadOnlyList<PointResult> results, string folder, OvenProfile oven, bool save, string? ovenFolder = null)
+    {
+        var ch = Characterisation.From(info, results);
+        var md = ch.Markdown(info);
+        File.WriteAllText(Path.Combine(folder, "characterisation.md"), md);
+        File.WriteAllText(Path.Combine(folder, "characterisation.json"), System.Text.Json.JsonSerializer.Serialize(ch, Json.Options));
+        AnsiConsole.WriteLine();
+        AnsiConsole.Write(new Rule("[orange1]Characterisation[/]").LeftJustified());
+        AnsiConsole.WriteLine(md);
+        if (!ch.MeasuredAny)
+            AnsiConsole.MarkupLine("[yellow]No gain could be measured: no setpoint was finished at both adjustments.[/]");
+        else if (!save)
+            AnsiConsole.MarkupLine("[grey]A simulation: the gains aren't saved to any oven's profile.[/]");
+        else if (oven.IsGeneric)
+            AnsiConsole.MarkupLine("[yellow]The gains aren't saved: the generic profile stands for every oven. Describe yours (docs/adding-an-oven.md), " +
+                                   "then save them with [bold]oventracker analyze \"" + Markup.Escape(folder) + "\" --oven <yours> --save-gains[/].[/]");
+        else
+        {
+            var gains = new Dictionary<OvenMode, MeasuredGain>(oven.Gains ?? new Dictionary<OvenMode, MeasuredGain>());
+            foreach (var (mode, g) in ch.MeasuredGains(DateTimeOffset.Now)) gains[mode] = g;
+            var path = OvenProfiles.Save(oven with { Gains = gains }, ovenFolder);
+            AnsiConsole.MarkupLine($"[green]Saved the measured gains to the {Markup.Escape(oven.Name)}'s profile[/]: {Markup.Escape(path)}. Later runs use them.");
+        }
+        return ch;
     }
 
     /// <summary>Without a terminal nothing can be asked, so a new run needs these given. Null if nothing is missing.</summary>

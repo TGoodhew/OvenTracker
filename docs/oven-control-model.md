@@ -63,35 +63,55 @@ The report then shows:
 
 ## Measuring it on your oven
 
-The model's weakest point is *g*, until it's measured. To measure it:
+The model's weakest point is *g*, until it's measured. `characterise` measures it, for any oven, in one
+session:
 
-1. **Run at the current adjustment**, at three or four setpoints across the range you use (e.g. 325, 375 and
-   425 °F), giving the adjustment with `--adjustment` (0 if it has never been changed).
-2. **Change the adjustment** by a clear amount, 10 °F or more (or to the recommended setting, if that is
-   that far).
-3. **Run the same setpoints again**, giving the new adjustment.
-4. **Analyse both runs together:**
+```powershell
+OvenTracker characterise --oven <yours> --unit F --modes bake,convection --setpoints 325,375,425 --probe 80bk-a
+```
 
-   ```powershell
-   OvenTracker analyze "Documents\OvenTracker\2026-11-20 1400" "Documents\OvenTracker\2026-11-22 0900"
-   ```
+1. **Phase 1:** every setpoint in each mode at the current adjustment (it asks what that is; 0 if it has
+   never been changed).
+2. **The change:** when phase 1 is done, it asks you to change the adjustment, using your oven profile's
+   steps (`--oven`, see [Describing your oven](adding-an-oven.md)). The change is at least `--step`
+   (default 10 °F). It goes the way that brings the oven towards correct, and further if the best
+   adjustment is further, within the oven's range. A bigger change measures the gain better.
+3. **Phase 2:** the highest and lowest setpoints again in each mode (highest first, so the oven cools only
+   once).
+4. **The result,** written to `characterisation.md` and shown at the end:
+   - each mode's gain, with its uncertainty;
+   - how its error changes with temperature;
+   - repeatability, where a setpoint was measured more than once at one adjustment;
+   - the best adjustment using the measured gains.
 
-   The report says *"Measured from runs at different adjustments: each degree of adjustment moves this oven
-   0.97 degrees (±0.01)"*, and bases its recommendation on that. It writes `report-combined.md` in the
-   later run's folder.
+   It saves the gains to the oven's profile (`OvenTracker/ovens/<key>.json`), so later runs and recommendations
+   use them; the report says *"Using the gain measured on this oven before"*. A simulation never saves.
+   The generic profile stands for every oven, so it doesn't either: describe your oven first.
 
-If one of the runs didn't record its adjustment, `--adjustment` fills it in for any run that didn't record
-one. Keep the probe in the same place for both runs, since the results depend on where it is.
+It's one session, so you can stop at any point (**F**) and carry on later with `run --resume`; it remembers
+which phase it was in. With a slow oven it's long: allow two hours a setpoint, and split it across days.
+Keep the probe in the same place throughout, since the results depend on where it is.
 
-To tell how repeatable the results are, run the same setpoint on different days. The spread between runs is
-the real limit on how finely the oven can be adjusted.
+**From runs you've already made.** Two runs of the same setpoints at different adjustments give the same
+thing. Analyse them together, and add `--save-gains` to keep the result:
+
+```powershell
+OvenTracker analyze "Documents\OvenTracker\2026-11-20 1400" "Documents\OvenTracker\2026-11-22 0900" --oven <yours> --save-gains
+```
+
+If one of the runs didn't record its adjustment, `--adjustment` fills it in for any run that didn't record one.
+
+**Repeatability.** Run the same setpoint again on another day, without changing anything, and analyse it with
+the others: the characterisation lists each repeat and its spread. That spread is the real limit on how
+finely the oven can be adjusted.
 
 ## What the GE PHS925ST1SS does
 
-Not measured yet. The manual says only that the adjustment goes up to 35 °F hotter or cooler, affects
-baking and roasting but not broil or self-clean, and is kept through a power cut. It doesn't say whether
-it shifts every temperature by the same amount, or whether it affects convection the same way as bake.
-The steps above measure both. Record the results here:
+Not measured yet: see [#11](https://github.com/TGoodhew/OvenTracker/issues/11). The manual says only that the
+adjustment goes up to 35 °F hotter or cooler, affects baking and roasting but not broil or self-clean, and is
+kept through a power cut. It doesn't say whether it shifts every temperature by the same amount, or whether it
+affects convection the same way as bake. `characterise --oven ge-phs925` measures both, and saves the gains to
+the PHS925's profile. Record the results here:
 
 | Measured | Result |
 | --- | --- |
@@ -100,12 +120,17 @@ The steps above measure both. Record the results here:
 | Shape of the error, 300–500 °F | *to measure* |
 | Run-to-run repeatability at 350 °F | *to measure* |
 
+What is known: its thermostat cycles about every 20 minutes, with an 18 °F swing at 350 °F (2026-11-20), so
+`characterise` with three setpoints in both modes takes the best part of a day.
+
 ## Checking the method
 
-The simulator's adjustment moves its oven 1:1, so it's a check on the method rather than on any real oven.
-Two simulated runs, at adjustment 0 and at −8 °F, analysed together, gave a measured gain of 0.97 (±0.01),
-and a recommendation that brought bake to within 0.5 °F. The tests (`AdjustmentAdvisorTests`,
-`CombinedRunsTests`) cover:
+The simulator is a check on the method rather than on any real oven. Its adjustment moves the oven's target 1:1,
+but the air it measures doesn't follow exactly. Its thermostat's sensor lags the air, so a cooler setting moves
+the air about 0.9 degrees per degree. `characterise` on the simulator measured bake at 1.00 ±0.03 for a 10 °F
+hotter change, and 0.89 ±0.04 for a 10 °F cooler one: a real effect, found rather than assumed.
+
+The tests (`AdjustmentAdvisorTests`, `CombinedRunsTests`, `CharacteriseTests`) cover:
 
 - a constant error;
 - an error that grows linearly;
