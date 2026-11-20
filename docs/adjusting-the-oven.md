@@ -9,6 +9,10 @@ and the report gives that oven's steps.
 
 ## The short version
 
+To get from a first run to an oven that's right, follow [the best path to great results](best-results.md):
+name your probe and oven, characterise the oven, set the adjustment it recommends, and check it. This page
+explains what the results mean along the way.
+
 - Look at **Offset** (measured minus set). If the oven runs **+10 °F hot**, set the thermostat adjustment
   **10 °F cooler**. If it runs **−10 °F cold**, set it **10 °F hotter**. The correction is always the
   offset with its sign reversed.

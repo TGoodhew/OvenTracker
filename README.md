@@ -15,6 +15,34 @@ thermostat swings, and how bake and convection differ.
 
 *The live display at bake 350 °F, four cycles in. (These screenshots are from the built-in simulator, `--simulate`.)*
 
+## The best path to great results
+
+For an oven that's right, with numbers you can trust, do these in order. [The best path to great
+results](docs/best-results.md) explains each step.
+
+1. **Get the meter ready:** auto power-off **off** (the app shows how), a good battery, and
+   `OvenTracker meters --probe` finds it.
+2. **Name your probe** so the report knows its accuracy and range: `--probe 80bk-a`, or
+   `--probe-tolerance 2.2C,2%` from any probe's datasheet.
+3. **Name your oven** so the app knows its adjustment, convection conversion and cycle: `--oven ge-phs925`,
+   or [describe yours](docs/adding-an-oven.md) in a small JSON file. `OvenTracker ovens` lists them.
+4. **Prepare the oven:** turn its convection conversion off, find out its current adjustment (the app asks),
+   and start from cold if you can.
+5. **Place the probe** in the centre of the oven on the middle shelf, hanging free, the same place every time.
+6. **Characterise it:** each setpoint, then a change of adjustment, then the highest and lowest again. You can
+   stop with **F** and carry on later with `run --resume`.
+
+   ```powershell
+   OvenTracker characterise --oven ge-phs925 --probe 80bk-a --unit F --modes bake,convection --setpoints 325,375,425
+   ```
+
+7. **Read `characterisation.md` and `report.md`:** how far the adjustment moves your oven, whether the error
+   changes with temperature, and the **best adjustment** to enter.
+8. **Set it** on the oven, with the steps the report gives for your oven.
+9. **Check it** with a short run at the temperature you bake at most:
+   `OvenTracker run --unit F --modes bake --setpoints 350 --adjustment <new>`. The offset should be within the
+   probe's accuracy of zero.
+
 ## What you need
 
 - U1253B with a type K thermocouple in the temperature input, dial on temperature (°C or °F; the app
