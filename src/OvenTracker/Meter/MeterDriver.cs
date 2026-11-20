@@ -35,6 +35,12 @@ public interface IMeterDriver
     /// <summary>A simulation: the app runs faster than real time and tells it the oven's setting.</summary>
     bool IsSimulation => false;
 
+    /// <summary>
+    /// Whether this kind of meter switches itself off after a while, with the steps to turn that off.
+    /// Null (the default) for a meter that doesn't, such as a bench DMM: it then gets no warning.
+    /// </summary>
+    AutoPowerOff? AutoPowerOff => null;
+
     /// <summary>What to check when no meter answered.</summary>
     string NotFoundHelp { get; }
 

@@ -314,6 +314,7 @@ public sealed class Report(SessionInfo info, IReadOnlyList<PointResult> results)
         sb.AppendLine();
         var top = results.Count > 0 ? results.Max(r => r.Point.SetpointC) : 200;
         sb.AppendLine($"- {SensorAccuracy(top)}");
+        foreach (var line in Gaps()) sb.AppendLine($"- {line}");
         sb.AppendLine("- The probe measures the air where you put it. Ovens are hotter near the elements and walls, so keep it in the centre for every run if you want to compare runs.");
         sb.AppendLine("- If your oven converts convection temperatures down automatically (often by 25 °F / 15 °C), the convection setting entered here should be the one the oven actually targets.");
         sb.AppendLine();
@@ -321,6 +322,15 @@ public sealed class Report(SessionInfo info, IReadOnlyList<PointResult> results)
                       $"Oven's thermostat adjustment during the run: {(info.AdjustmentC is { } adj ? Adjustment(adj) : "not recorded")}. Raw data: `readings.csv`.");
         return sb.ToString();
     }
+
+    /// <summary>A gap in the readings longer than this (a minute) is worth mentioning.</summary>
+    public static readonly TimeSpan NotableGap = TimeSpan.FromMinutes(1);
+
+    /// <summary>Setpoints whose readings have a long gap, e.g. while the meter was switched off.</summary>
+    public IEnumerable<string> Gaps() =>
+        results.Where(r => r.Metrics.LongestGapSeconds is { } g && g >= NotableGap.TotalSeconds)
+            .Select(r => $"{Temp.ModeName(r.Point.Mode)} {f.Setpoint(r.Point.SetpointC)} has a {Minutes(r.Metrics.LongestGapSeconds!.Value / 60)} gap in its readings " +
+                         "(the meter went quiet, perhaps its auto power-off). The cycle means across the gap are interpolated, so treat it with a little more care.");
 
     /// <summary>What the sensor and meter add to the statistical uncertainty, at the highest setpoint.</summary>
     public string SensorAccuracy(double topC)

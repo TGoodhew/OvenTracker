@@ -22,6 +22,23 @@ public sealed class U1253BDriver : IMeterDriver
 
     public string NotTemperatureHelp => "Turn the dial to temperature (°C/°F) with the thermocouple plugged in.";
 
+    /// <summary>
+    /// The U1253B's auto power-off (APO) is 10 minutes from the factory, and reading it over the IR port
+    /// doesn't restart the countdown: only a button, turning the dial, dynamic recording or 1 ms peak hold
+    /// do (User's and Service Guide, p. 126). It doesn't report the setting remotely that we know of, so
+    /// the meter reports it as unknown and the app shows the steps as a reminder.
+    /// </summary>
+    public AutoPowerOff AutoPowerOff { get; } = new(
+        TimeSpan.FromMinutes(10),
+        [
+            "Hold the button that steps through the functions at the dial's current position (button 4 in the guide's keypad table) for more than a second, to enter Setup.",
+            "Use the arrow buttons to go to APO, then press Hz to edit it.",
+            "Set every digit to zero, which means OFF.",
+            "Press Hz to save, then hold the same button for more than a second to leave Setup.",
+        ],
+        "Keysight U1253B User's and Service Guide, pp. 34, 110 and 126–127",
+        HowToWake: "press any button on the meter, or turn the dial");
+
     static bool IsU1250(MeterIdentity id) => id.Model.StartsWith("U12", StringComparison.OrdinalIgnoreCase);
 
     public ProbeResult? Open(MeterRequest request)

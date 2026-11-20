@@ -88,6 +88,10 @@ public sealed class RunSettings : AdjustmentSettings
     [Description("With --simulate, start as if the oven had just been used at this temperature, in the oven's unit.")]
     public double? SimHot { get; set; }
 
+    [CommandOption("--sim-apo <MINUTES>", IsHidden = true)]
+    [Description("With --simulate, give the simulated meter an auto power-off after this many minutes (it wakes 2 minutes later).")]
+    public double? SimApo { get; set; }
+
     [CommandOption("-y|--yes")]
     [Description("Don't ask: start at once and begin each setpoint straight away (mainly for --simulate).")]
     public bool Yes { get; set; }
@@ -211,6 +215,8 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
             if (about.Count > 0) AnsiConsole.MarkupLine(string.Join(", ", about) + ".");
         }
         var oven = meter as IOvenSimulation;
+        if (s.SimApo is { } simApo) oven?.SetAutoPowerOff(TimeSpan.FromMinutes(simApo));
+        if (!await CheckAutoPowerOffAsync(driver, meter, identity, appSettings, s.Yes, ct)) { meter.Dispose(); return 0; }
         var first = meter.Read();
         if (first.Status == ReadingStatus.Overload)
             AnsiConsole.MarkupLine("[yellow]The meter reads OL: the probe isn't connected (or is broken).[/]");
@@ -347,8 +353,8 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
 
         var results = new List<PointResult>(done);
         var meterLabel = driver.IsSimulation ? "simulated meter" : $"{identity.Model} on {meter.Location}";
-        var tracker = new PointTracker(poller, recorder, f, options, toleranceC, meterLabel, driver.NotTemperatureHelp, plan.Count, driver.IsSimulation);
-        var waiter = new ResetWaiter(poller, recorder, f, ambientC ?? AssumedAmbientC, ambientC is null, driver.IsSimulation);
+        var tracker = new PointTracker(poller, recorder, f, options, toleranceC, meterLabel, driver.NotTemperatureHelp, plan.Count, driver.IsSimulation, driver.AutoPowerOff);
+        var waiter = new ResetWaiter(poller, recorder, f, ambientC ?? AssumedAmbientC, ambientC is null, driver.IsSimulation, driver.AutoPowerOff);
         var afterReset = resumed is not null; // the first setpoint of a resumed run follows a break
         var stopped = false;
         try
@@ -424,6 +430,70 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
             AnsiConsole.MarkupLine($"{left} setpoint{(left == 1 ? "" : "s")} still to do. To carry on later, even after using the oven: [bold]oventracker run --resume \"{Markup.Escape(outDir)}\"[/]");
         AnsiConsole.MarkupLine("[grey]Turn the oven off.[/]");
         return 0;
+    }
+
+    /// <summary>
+    /// Warns, before a run, about a meter that will switch itself off mid-setpoint: when the meter says its
+    /// auto power-off is on, or when its driver says it has one and the meter can't say (unless you've
+    /// said it's off for this meter before). Returns false if you chose to stop.
+    /// </summary>
+    static async Task<bool> CheckAutoPowerOffAsync(IMeterDriver driver, ITemperatureMeter meter, MeterIdentity identity, AppSettings settings, bool yes, CancellationToken ct)
+    {
+        var key = $"{driver.Name}:{identity.Serial}";
+        AutoPowerOffSetting Read()
+        {
+            try { return meter.ReadAutoPowerOff(); } catch { return AutoPowerOffSetting.Unknown; }
+        }
+        var setting = Read();
+        while (true)
+        {
+            var warning = AutoPowerOffAdvice.For(driver.AutoPowerOff, setting, settings.IsAutoPowerOffTurnedOff(key));
+            if (warning is null)
+            {
+                if (setting.State == AutoPowerOffState.Off) AnsiConsole.MarkupLine("[grey]Auto power-off is off.[/]");
+                else if (driver.AutoPowerOff is not null && settings.IsAutoPowerOffTurnedOff(key))
+                    AnsiConsole.MarkupLine("[grey]Auto power-off: you said it's turned off on this meter.[/]");
+                return true;
+            }
+
+            var body = new List<string> { $"[bold]{Markup.Escape(warning.Headline)}[/]" };
+            if (warning.Steps.Count > 0)
+            {
+                body.Add("");
+                body.Add("To turn it off:");
+                body.AddRange(warning.Steps.Select((step, i) => $"  {i + 1}. {Markup.Escape(step)}"));
+            }
+            if (warning.Source is { } source) body.Add($"[grey]({Markup.Escape(source)})[/]");
+            AnsiConsole.Write(new Panel(new Markup(string.Join("\n", body)))
+                .Header(warning.Kind == AutoPowerOffWarningKind.On ? "[red]Auto power-off is on[/]" : "[yellow]Auto power-off[/]")
+                .Border(BoxBorder.Rounded).BorderColor(warning.Kind == AutoPowerOffWarningKind.On ? Color.Red : Color.Yellow));
+            if (yes || driver.IsSimulation)
+            {
+                AnsiConsole.MarkupLine("[grey]If the meter switches itself off anyway, the live display says so and tracking carries on once it's woken.[/]");
+                return true;
+            }
+
+            const string turnedOff = "I've turned it off: don't remind me again for this meter";
+            const string checkAgain = "I've changed it: check again";
+            const string carryOn = "Carry on anyway (the display will say if the meter switches off)";
+            const string stop = "Stop";
+            var choices = setting.State == AutoPowerOffState.Unknown ? new[] { turnedOff, carryOn, stop } : new[] { checkAgain, carryOn, stop };
+            var choice = await new SelectionPrompt<string>().Title("Auto power-off:").AddChoices(choices).ShowAsync(AnsiConsole.Console, ct);
+            switch (choice)
+            {
+                case turnedOff:
+                    settings.RememberAutoPowerOffTurnedOff(key);
+                    settings.Save();
+                    return true;
+                case checkAgain:
+                    setting = Read();
+                    continue;
+                case stop:
+                    return false;
+                default:
+                    return true;
+            }
+        }
     }
 
     /// <summary>Room temperature to assume when it wasn't measured or given: 70 °F.</summary>

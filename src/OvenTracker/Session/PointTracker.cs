@@ -17,7 +17,8 @@ public sealed class PointTracker(
     string meterLabel,
     string notTemperatureHint,
     int pointCount,
-    bool fast)
+    bool fast,
+    AutoPowerOff? autoPowerOff = null)
 {
     public async Task<(PointResult Result, PointOutcome Outcome)> RunAsync(TestPoint point, CancellationToken ct)
     {
@@ -31,10 +32,12 @@ public sealed class PointTracker(
         var view = ChartView.Auto;
         var outcome = PointOutcome.Next;
         var canReadKeys = !Console.IsInputRedirected;
+        var silence = new SilenceWatch();
+        string? alert = null;
 
         IRenderableFactory render = () => Dashboard.Render(new DashboardModel(
             point, pointCount, analyzer, format, poller, meterLabel, notTemperatureHint, toleranceC, view, lastStatus, notice,
-            SafeWidth(), SafeHeight()));
+            SafeWidth(), SafeHeight(), alert));
 
         // Start the live display at the top of a clear screen, so it never has to scroll.
         if (canReadKeys) Console.Write("\u001b[H\u001b[2J"); // the screen only: earlier output stays in the scrollback
@@ -62,6 +65,20 @@ public sealed class PointTracker(
                         if (r is { Status: ReadingStatus.Ok, Celsius: { } c }) analyzer.Add(elapsed, c);
                         if (analyzer.Phase == PointPhase.Complete) break;
                     }
+
+                    // A meter that has gone quiet (often its auto power-off): say so, beep once, and mark the gap.
+                    switch (silence.Update(poller.SilentFor))
+                    {
+                        case SilenceChange.WentQuiet:
+                            recorder.Event(lastTime, point, analyzer.Now, "meter-silent");
+                            Console.Write("\a");
+                            break;
+                        case SilenceChange.CameBack:
+                            recorder.Event(lastTime, point, analyzer.Now, "meter-back");
+                            notice = "The meter is answering again; tracking carries on.";
+                            break;
+                    }
+                    alert = silence.Silent ? SilenceWatch.Message(poller.SilentFor, autoPowerOff) : null;
 
                     if (ct.IsCancellationRequested)
                     {

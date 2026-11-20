@@ -85,7 +85,8 @@ public sealed record PointMetrics(
     double TotalMinutes,
     double? PreheatSignalMinutes,
     double? PreheatSignalC,
-    double PrecisionTargetC)
+    double PrecisionTargetC,
+    double? LongestGapSeconds = null)
 {
     public double? OffsetC => MeanC - SetpointC;
     public bool MetPrecision => HalfWidthC is { } hw && hw <= PrecisionTargetC + 1e-9;
@@ -382,6 +383,16 @@ public sealed class SetpointAnalyzer
         return new Eta(Math.Min(seconds, cap), rough);
     }
 
+    /// <summary>The longest time between two readings, e.g. while the meter was switched off.</summary>
+    double? LongestGap()
+    {
+        var items = series.Items;
+        if (items.Count < 2) return null;
+        double longest = 0;
+        for (var i = 1; i < items.Count; i++) longest = Math.Max(longest, items[i].T - items[i - 1].T);
+        return longest;
+    }
+
     public PointMetrics Metrics()
     {
         var e = CurrentEstimate;
@@ -401,6 +412,6 @@ public sealed class SetpointAnalyzer
             StartC, timeToSetpoint / 60, overshootC,
             units.Count > 0 ? units[0].Start / 60 : measuringStart / 60,
             measureMin, (CompletedAt ?? Now) / 60,
-            preheatT / 60, preheatC, o.PrecisionC);
+            preheatT / 60, preheatC, o.PrecisionC, LongestGap());
     }
 }

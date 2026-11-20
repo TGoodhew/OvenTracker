@@ -22,6 +22,16 @@ public sealed class AppSettings
             ? driver == DriverBeforeDrivers ? LastPort : null
             : string.Equals(LastMeter, driver, StringComparison.OrdinalIgnoreCase) ? LastResource : null;
 
+    /// <summary>Meters ("driver:serial") whose auto power-off you've said is turned off, so the app stops reminding you.</summary>
+    public List<string> AutoPowerOffTurnedOff { get; set; } = [];
+
+    public bool IsAutoPowerOffTurnedOff(string meterKey) => AutoPowerOffTurnedOff.Contains(meterKey, StringComparer.OrdinalIgnoreCase);
+
+    public void RememberAutoPowerOffTurnedOff(string meterKey)
+    {
+        if (!IsAutoPowerOffTurnedOff(meterKey)) AutoPowerOffTurnedOff.Add(meterKey);
+    }
+
     public void Remember(string driver, string resource)
     {
         LastMeter = driver;

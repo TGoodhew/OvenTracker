@@ -19,6 +19,12 @@ thermostat swings, and how bake and convection differ.
 
 - U1253B with a type K thermocouple in the temperature input, dial on temperature (°C or °F; the app
   reads whichever the meter shows).
+- **The meter's auto power-off turned off.** The U1253B switches itself off after 10 minutes by default,
+  and reading it over Bluetooth doesn't keep it on, so it would switch off in the middle of every setpoint.
+  To turn it off: hold the button that steps through the functions at the dial's position (button 4 in the
+  guide's keypad table) for more than a second to enter Setup, go to **APO** with the arrow buttons, press
+  **Hz**, set every digit to zero (OFF), press **Hz** to save, and hold the button again to leave Setup
+  (User's and Service Guide, pp. 110 and 126–127). The app reminds you before a run until you say it's off.
 - U1177A clipped to the meter's IR port, switched on and paired with the computer:
   - **Windows:** pair it in Bluetooth settings. Pairing adds two "Standard Serial over Bluetooth link" COM
     ports. The app uses the **outgoing** one (the one with the adapter's address) and finds it by itself.
@@ -85,6 +91,11 @@ conditions. `--grouped` does all of bake first.
 Keys while tracking: **P** preheat signal · **N N** finish this setpoint now · **R R** restart it (if
 the door was opened) · **S S** skip · **Z** chart view · **Q Q** quit and write the report.
 Ctrl+C also stops cleanly and writes the report.
+
+If the meter stops answering for 30 s (most often its auto power-off), the live display says so in red,
+with how to wake it ("press any button on the meter, or turn the dial"), and the PC beeps. Tracking
+carries on as soon as readings come back. The gap is recorded in `readings.csv`, and the report notes any
+setpoint with a gap of a minute or more.
 
 ### Splitting a session (oven reset)
 
@@ -182,21 +193,12 @@ Without `--meter` the app uses the meter that answered last time, or the U1253B.
 each driver can see. `--probe` asks each likely place what is there, and `--all` asks every place. (`ports`
 and `--port` still work, as the names they had when there was only the U1253B.)
 
-To add a meter, for example a bench DMM with a thermocouple input over VISA:
-
-1. Implement `ITemperatureMeter` (`Meter/Meter.cs`). Only `Location`, `Connect`, `Disconnect` and `Read` are
-   required. `Read` returns the temperature in °C, or `Overload` for an open probe. Also implement any of these
-   the meter can do; the app does without the ones it can't:
-   - `ReadConfig` / `LastConfig`: what the meter is set to, and the sensor (`Sensor.Thermocouple("K")`). The
-     report uses the sensor for its accuracy section.
-   - `ReadBatteryPercent`
-   - `Beep`
-2. Implement `IMeterDriver` (`Meter/MeterDriver.cs`): its `--meter` name, how to find the meter (`Open`, `Discover`,
-   `Probe`), what `--resource` means for it, and what to tell people when it can't find the meter.
-3. Add it to `MeterDrivers.All`.
-
-`U1253BDriver` and `SimulatedDriver` are the examples. Each run records the driver, the meter's identity and the
-sensor in `session.json` and `results.json`.
+To add a meter, for example a bench DMM with a thermocouple input, implement `ITemperatureMeter` and
+`IMeterDriver` and list the driver in `MeterDrivers.All`. Only four members are required; the rest (the
+sensor, battery, beep, and the meter's auto power-off setting) are optional. A driver can also declare that
+its meter switches itself off, with the steps to turn that off, and the app then warns before a run.
+[Adding a meter](docs/adding-a-meter.md) explains every member, with a sketch of a SCPI bench-meter driver.
+`U1253BDriver` and `SimulatedDriver` are the worked examples.
 
 ## Protocol notes (U1253B)
 
