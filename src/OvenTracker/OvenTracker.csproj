@@ -1,0 +1,30 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net11.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>OvenTracker</AssemblyName>
+    <RootNamespace>OvenTracker</RootNamespace>
+    <Version>1.0.0</Version>
+    <Product>OvenTracker</Product>
+    <Company>The Schnauzer Group LLC</Company>
+    <Copyright>© The Schnauzer Group LLC</Copyright>
+    <Description>Checks an oven's temperature accuracy (bake and convection) with a Keysight U1253B over a U1177A Bluetooth adapter.</Description>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="OvenTracker.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Spectre.Console" Version="0.57.2" />
+    <PackageReference Include="Spectre.Console.Cli" Version="0.57.2" />
+    <PackageReference Include="System.IO.Ports" Version="11.0.0" />
+    <PackageReference Include="System.Management" Version="11.0.0" />
+  </ItemGroup>
+
+</Project>
