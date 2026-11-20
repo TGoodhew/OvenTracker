@@ -261,11 +261,12 @@ adjustment](docs/oven-control-model.md) explains the method.
 
 ## Other meters
 
-Each kind of meter has a driver in `src/OvenTracker/Meter`. Two come with the app:
+Each kind of meter has a driver in `src/OvenTracker/Meter`. Three come with the app:
 
 | `--meter` | What it is | `--resource` |
 | --- | --- | --- |
 | `u1253b` (the default) | A Keysight U1253B (or another U1250-series meter) through a U1177A Bluetooth adapter or a U1173 cable | A serial port: `COM5` on Windows, `/dev/rfcomm0` on Linux (9600 8N1, or give settings: `COM5:9600,N,8,1`). Left out, the app tries the port that worked last time, then each Bluetooth link. |
+| `34401a` | An HP / Agilent / Keysight 34401A bench DMM reading a PT100 RTD by 4-wire resistance (see below) | `GPIB0::22::INSTR` (or `gpib:22`) through VISA, or a serial port for its RS-232 port: `COM3`, `/dev/ttyUSB0` (9600, even parity, 7 data bits, 2 stop bits from the factory, or give settings: `COM3:9600,N,8,2`). Required the first time, then remembered. |
 | `simulated` | A made-up oven and meter. `--simulate` is short for `--meter simulated`. | Not used. |
 
 Without `--meter` the app uses the meter that answered last time, or the U1253B. `oventracker meters` lists what
@@ -286,12 +287,44 @@ newer ones USB and LAN. `--resource` says both where and how, by its form:
 Each driver says which it accepts (`OvenTracker run --help`, and its row above). The app remembers the resource,
 settings and all, for next time.
 
+### The 34401A with a PT100
+
+The 34401A has no temperature function, so the app measures a platinum RTD's resistance with 4-wire ohms and
+converts it with the IEC 60751 (Callendar–Van Dusen) equation. A PT100 is more accurate than a thermocouple:
+class A is ±(0.15 °C + 0.2 % of the temperature), about ±0.6 °C at 230 °C, against ±2.2 °C for a standard type
+K. It also needs no cold-junction compensation. For a 4-wire PT100, connect one pair of its leads to
+HI and LO Input and the other pair to HI and LO Sense (Ω 4W). Use a probe whose cable is rated for the oven's
+temperature (PTFE or glass-fibre insulation), and give its limit with `--probe-max`, e.g. `--probe-max 260C`.
+
+```powershell
+OvenTracker.exe run --meter 34401a --resource GPIB0::22::INSTR            # a class A PT100, the default
+OvenTracker.exe run --meter 34401a --resource COM3 --meter-option rtd=pt100-b
+```
+
+- **The RTD:** `--meter-option rtd=` takes `pt100`, `pt100-a`, `pt100-b`, `pt100-aa` or `pt1000` (class A when
+  left off). Its class is the probe tolerance in the report.
+- **Integration time:** `--meter-option nplc=` takes 0.02, 0.2, 1, 10 (the default, about half a second a
+  reading) or 100 (quieter, about 4 s a reading).
+- **Remembered:** the app remembers the address and the options, so after the first run `--meter 34401a` is
+  enough.
+- **GPIB** needs VISA: NI-VISA (with NI-488.2 for an NI adapter) or Keysight IO Libraries Suite, 64-bit. The app
+  loads it only when GPIB is used, and says so if it isn't installed. The address is on the meter under
+  I/O MENU, HP-IB ADDR (22 from the factory).
+- **RS-232:** choose it on the meter under I/O MENU, INTERFACE. The meter only sends when it sees DTR, so use a
+  null-modem cable that passes DTR/DSR (the 34398A is the one HP sold for it). The app holds DTR on.
+- **No searching:** the app doesn't search the bus, since writing to unknown instruments isn't always harmless.
+  `oventracker meters --probe --meter 34401a` asks each GPIB instrument VISA can see what it is (`*IDN?` only,
+  nothing else is changed).
+- **A bench meter:** it's mains powered, so there's no battery and no auto power-off. It beeps when a setpoint
+  is done.
+
 To add a meter, for example a bench DMM with a thermocouple input, implement `ITemperatureMeter` and
 `IMeterDriver` and list the driver in `MeterDrivers.All`. Only four members are required; the rest (the
 sensor, battery, beep, and the meter's auto power-off setting) are optional. A driver can also declare that
 its meter switches itself off, with the steps to turn that off, and the app then warns before a run.
 [Adding a meter](docs/adding-a-meter.md) explains every member, with a sketch of a SCPI bench-meter driver.
-`U1253BDriver` and `SimulatedDriver` are the worked examples.
+`U1253BDriver` (serial and Bluetooth), `Hp34401ADriver` (GPIB through VISA, RS-232, and its own
+`--meter-option` settings) and `SimulatedDriver` are the worked examples.
 
 ## Protocol notes (U1253B)
 
@@ -301,6 +334,15 @@ an open thermocouple), `SYST:BATT?` and `SYST:BEEP`. It ignores the meter's own 
 when the dial moves, `*L` for a button). It re-checks `CONF?` every few readings, so turning the dial
 away from temperature is noticed and those readings aren't used. If the Bluetooth link drops, the app
 reconnects and carries on.
+
+## Protocol notes (34401A)
+
+On GPIB, commands end in LF and replies end with EOI. On RS-232 the app first sends `SYST:REM`, as the manual
+asks (User's Guide, p. 160). It then checks that `*IDN?` names a 34401A before changing anything. It sends
+`*RST`, `*CLS`, `CONF:FRES 1E+3` (the 1 kΩ range for a PT100, 10 kΩ for a PT1000), `FRES:NPLC 10` and
+`ZERO:AUTO ON`, and checks `SYST:ERR?`. Then it polls with `READ?`. +9.9E+37 means an open RTD. It re-checks
+`CONF?` every 30 readings, in case someone pressed Local and changed the function. At the end it gives the
+front panel back.
 
 ## Build
 

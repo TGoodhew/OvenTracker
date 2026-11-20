@@ -1,7 +1,7 @@
 # Adding a meter
 
-OvenTracker reads its temperatures through a **driver**, one for each kind of meter. Two come with the
-app: the Keysight U1253B (`u1253b`) and the simulator (`simulated`). This page explains how to add another,
+OvenTracker reads its temperatures through a **driver**, one for each kind of meter. Three come with the
+app: the Keysight U1253B (`u1253b`), the HP 34401A with a PT100 (`34401a`) and the simulator (`simulated`). This page explains how to add another,
 for example a bench DMM with a thermocouple input, or a USB thermocouple logger.
 
 A meter needs two classes, both in `src/OvenTracker/Meter`:
@@ -67,6 +67,8 @@ then disconnects and reconnects.
 | `ProbeResult Probe(string resource)` | Ask one place whether this kind of meter is there, then close it again. |
 | `bool IsSimulation` | Default `false`. Only the simulator is a simulation. |
 | `AutoPowerOff? AutoPowerOff` | Default `null`. See below. |
+| `IReadOnlyList<MeterOption> Options` | Default none. The settings your driver takes through `--meter-option key=value`. See below. |
+| `string? CheckOptions(options)` | Default: refuses any option. Say what's wrong with the options given, or return null. |
 
 Text the driver returns is plain text, not Spectre markup: the app escapes it.
 
@@ -147,12 +149,42 @@ In your driver:
 - **Describe each transport** in `ResourceHelp`, e.g. "a GPIB address (GPIB0::22::INSTR), or a serial port
   with its settings (COM3:9600,E,7,2,dtr)".
 
+### GPIB, USB and LAN through VISA
+
+`Meter/Visa.cs` wraps the VISA C library (NI-VISA, Keysight IO Libraries, R&S VISA). It loads the library only
+when it's used, so the app builds and runs without it:
+
+- `Visa.IsAvailable` says whether the library loads, and `Visa.MissingHelp` says what to install.
+- `Visa.Find("GPIB?*INSTR")` lists resources for `Discover`.
+- `Visa.Open(resource, timeout)` opens one, for writes and reads.
+
+`Meter/ScpiPort.cs` puts a line-at-a-time `IScpiPort` over both VISA and a serial port. A meter written
+against `IScpiPort` works on either link, and tests drive it with a fake; see `Hp34401ATests`. The 34401A's
+driver chooses the link from the resource with `Hp34401ADriver.PortFor`.
+
+Don't search a GPIB bus by writing to every address: other instruments may not like it, and a bus extender
+makes every address look occupied. Try `request.Resource` or `request.Preferred`. List the bus in `Discover`,
+so `oventracker meters --probe` asks each instrument only when someone asks for that.
+
+## Driver settings: `--meter-option`
+
+Settings that only your meter has go through `--meter-option key=value`. There's no new command-line option
+per driver.
+
+1. List each setting in `Options`, for the help text.
+2. Check the given values in `CheckOptions`. The app calls it before connecting and stops with your message
+   if it returns one. Keys arrive in lower case.
+3. Read them from `MeterRequest.Options` in `Open`.
+
+The app remembers each driver's options with its resource. The 34401A's `rtd` (PT100 class) and `nplc`
+(integration time) are the example.
+
 ## Registering the driver
 
 Add an instance to `MeterDrivers.All` in `MeterDriver.cs`:
 
 ```csharp
-public static IReadOnlyList<IMeterDriver> All { get; } = [new U1253BDriver(), new SimulatedDriver(), new My34465ADriver()];
+public static IReadOnlyList<IMeterDriver> All { get; } = [new U1253BDriver(), new Hp34401ADriver(), new SimulatedDriver(), new My34465ADriver()];
 ```
 
 `--meter` takes its `Name`. Without `--meter`, the app uses the meter that answered last time, or the

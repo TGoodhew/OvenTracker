@@ -64,13 +64,14 @@ public class MeterDriverTests
     [Theory]
     [InlineData("u1253b", typeof(U1253BDriver))]
     [InlineData("U1253B", typeof(U1253BDriver))]
+    [InlineData("34401A", typeof(Hp34401ADriver))]
     [InlineData("simulated", typeof(SimulatedDriver))]
     public void DriversAreFoundByName(string name, Type type) => Assert.IsType(type, MeterDrivers.Find(name));
 
     [Fact]
     public void AnUnknownDriverIsNotFound()
     {
-        Assert.Null(MeterDrivers.Find("34401a"));
+        Assert.Null(MeterDrivers.Find("fluke87"));
         Assert.Null(MeterDrivers.Find(null));
         Assert.Contains(MeterDrivers.All, d => d.Name == MeterDrivers.DefaultName);
     }

@@ -5,7 +5,13 @@ namespace OvenTracker.Meter;
 /// <param name="Preferred">Where a meter answered last time, tried first when searching.</param>
 /// <param name="IntervalSeconds">How often the app will read the meter.</param>
 /// <param name="Progress">Told each place the driver tries, for the status line.</param>
-public sealed record MeterRequest(string? Resource, string? Preferred, double IntervalSeconds, Action<string>? Progress = null);
+/// <param name="Options">The driver's own settings from --meter-option (key=value), already checked by <see cref="IMeterDriver.CheckOptions"/>.</param>
+public sealed record MeterRequest(string? Resource, string? Preferred, double IntervalSeconds, Action<string>? Progress = null,
+    IReadOnlyDictionary<string, string>? Options = null);
+
+/// <summary>A setting a driver takes through <c>--meter-option key=value</c>, for the help text.</summary>
+/// <param name="Values">The values it takes, for people, e.g. "pt100, pt100-b".</param>
+public sealed record MeterOption(string Key, string Values, string Description);
 
 /// <summary>The outcome of asking one place for a meter.</summary>
 /// <param name="Meter">The connected meter, when the caller asked to keep it open.</param>
@@ -45,6 +51,13 @@ public interface IMeterDriver
     /// </summary>
     AutoPowerOff? AutoPowerOff => null;
 
+    /// <summary>The settings this driver takes through --meter-option. None by default.</summary>
+    IReadOnlyList<MeterOption> Options => [];
+
+    /// <summary>What's wrong with the --meter-option settings given, or null if they're all right. Keys are lower case.</summary>
+    string? CheckOptions(IReadOnlyDictionary<string, string> options) =>
+        options.Count == 0 ? null : $"The {Name} meter takes no --meter-option.";
+
     /// <summary>What to check when no meter answered.</summary>
     string NotFoundHelp { get; }
 
@@ -69,10 +82,23 @@ public static class MeterDrivers
 {
     public const string DefaultName = U1253BDriver.DriverName;
 
-    public static IReadOnlyList<IMeterDriver> All { get; } = [new U1253BDriver(), new SimulatedDriver()];
+    public static IReadOnlyList<IMeterDriver> All { get; } = [new U1253BDriver(), new Hp34401ADriver(), new SimulatedDriver()];
 
     public static IMeterDriver? Find(string? name) =>
         All.FirstOrDefault(d => string.Equals(d.Name, name?.Trim(), StringComparison.OrdinalIgnoreCase));
 
     public static string Names => string.Join(", ", All.Select(d => d.Name));
+
+    /// <summary>Reads --meter-option values ("rtd=pt100-b", or several separated by commas). Null if one isn't key=value.</summary>
+    public static IReadOnlyDictionary<string, string>? ParseOptions(IEnumerable<string>? given)
+    {
+        var options = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var item in (given ?? []).SelectMany(g => g.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)))
+        {
+            var eq = item.IndexOf('=');
+            if (eq <= 0 || eq == item.Length - 1) return null;
+            options[item[..eq].Trim().ToLowerInvariant()] = item[(eq + 1)..].Trim();
+        }
+        return options;
+    }
 }
