@@ -12,12 +12,20 @@ namespace OvenTracker.Commands;
 
 public sealed class RunSettings : CommandSettings
 {
-    [CommandOption("-p|--port <PORT>")]
-    [Description("Serial port of the U1177A (e.g. COM5). Found automatically if left out.")]
+    [CommandOption("--meter <DRIVER>")]
+    [Description("Which kind of meter: u1253b (the default) or simulated. [bold]oventracker meters[/] lists them and what each can see.")]
+    public string? Meter { get; set; }
+
+    [CommandOption("-r|--resource <WHERE>")]
+    [Description("Where the meter is, in the driver's terms (e.g. COM5 for the U1253B). Found automatically if left out.")]
+    public string? Resource { get; set; }
+
+    [CommandOption("-p|--port <PORT>", IsHidden = true)]
+    [Description("The same as --resource: the name it had when there was only a serial meter.")]
     public string? Port { get; set; }
 
     [CommandOption("--simulate")]
-    [Description("Use a simulated oven and meter instead of the real ones.")]
+    [Description("Use a simulated oven and meter instead of the real ones: the same as --meter simulated.")]
     public bool Simulate { get; set; }
 
     [CommandOption("--speed <X>")]
@@ -74,6 +82,10 @@ public sealed class RunSettings : CommandSettings
 
     public override ValidationResult Validate()
     {
+        if (Meter is not null && MeterDrivers.Find(Meter) is null) return ValidationResult.Error($"--meter must be one of: {MeterDrivers.Names}.");
+        if (Simulate && Meter is not null && MeterDrivers.Find(Meter)?.IsSimulation != true) return ValidationResult.Error("--simulate can't be used with another --meter.");
+        if (Port is not null && Resource is not null && !string.Equals(Port, Resource, StringComparison.OrdinalIgnoreCase))
+            return ValidationResult.Error("Give the meter's location once, with --resource.");
         if (Unit is not null && Temp.ParseUnit(Unit) is null) return ValidationResult.Error("--unit must be F or C.");
         if (Interval is < 0.5 or > 30) return ValidationResult.Error("--interval must be between 0.5 and 30 seconds.");
         if (MinCycles is < 2 or > 20) return ValidationResult.Error("--min-cycles must be between 2 and 20.");
@@ -129,65 +141,66 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
     public override async Task<int> ExecuteAsync(CommandContext context, RunSettings s, CancellationToken cancellationToken)
     {
         var ct = cancellationToken;
+        var appSettings = AppSettings.Load();
+        var driver = ChooseDriver(s, appSettings);
+        var resource = s.Resource ?? s.Port;
         AnsiConsole.Write(new FigletText("OvenTracker").Color(Color.Orange1));
-        AnsiConsole.MarkupLine($"[grey]v{Version} · oven accuracy with a Keysight U1253B and U1177A Bluetooth adapter[/]");
+        AnsiConsole.MarkupLine($"[grey]v{Version} · oven temperature accuracy · {Markup.Escape(driver.Description)}[/]");
         AnsiConsole.WriteLine();
 
         // 1. The meter.
-        ITemperatureMeter meter;
-        SimulatedOven? oven = null;
-        MeterIdentity identity;
-        if (s.Simulate)
+        ProbeResult? found = null;
+        await AnsiConsole.Status().StartAsync("Looking for the meter…", async sc =>
         {
-            oven = new SimulatedOven(Environment.TickCount);
-            meter = new SimulatedMeter(oven, s.Interval);
-            identity = meter.Connect();
+            found = await Task.Run(() => driver.Open(new MeterRequest(resource, appSettings.LastResourceFor(driver.Name), s.Interval,
+                where => sc.Status($"Trying {Markup.Escape(where)}…"))), ct);
+        });
+        if (found?.Meter is not { } meter || found.Identity is not { } identity)
+        {
+            AnsiConsole.MarkupLine(resource is not null
+                ? $"[red]No meter answered on {Markup.Escape(resource)}[/]: {Markup.Escape(found?.Error ?? "")}"
+                : $"[red]No meter answered[/] (looking for a {Markup.Escape(driver.Description)}).");
+            if (driver.NotFoundHelp.Length > 0) AnsiConsole.MarkupLine(Markup.Escape(driver.NotFoundHelp));
+            AnsiConsole.MarkupLine($"[bold]oventracker meters[/] lists what each kind of meter can see. Give the meter's location with [bold]--resource[/] " +
+                                   $"({Markup.Escape(driver.ResourceHelp)}), or another kind of meter with [bold]--meter[/] ({Markup.Escape(MeterDrivers.Names)}).");
+            return 1;
+        }
+
+        MeterConfig? config;
+        if (driver.IsSimulation)
+        {
+            config = meter.ReadConfig();
             AnsiConsole.MarkupLine($"[yellow]Simulation[/]: a made-up oven, running {s.Speed.ToString("0.#", Inv)}× real time.");
         }
         else
         {
-            var settings = AppSettings.Load();
-            ProbeResult? found = null;
-            await AnsiConsole.Status().StartAsync("Looking for the meter…", async sc =>
-            {
-                found = await Task.Run(() => s.Port is not null
-                    ? PortFinder.Probe(s.Port, keepOpen: true)
-                    : PortFinder.Find(settings.LastPort, includeAll: false, port => sc.Status($"Trying {port}… (a Bluetooth port can take a few seconds)"), keepOpen: true), ct);
-            });
-            if (found?.Meter is null)
-            {
-                AnsiConsole.MarkupLine(s.Port is not null
-                    ? $"[red]No meter answered on {Markup.Escape(s.Port)}[/]: {Markup.Escape(found?.Error ?? "")}"
-                    : "[red]No U1253B answered on any Bluetooth serial port.[/]");
-                AnsiConsole.MarkupLine("Check the meter is on, the U1177A is clipped on and switched on (its light blinks), and that it is paired in Windows Bluetooth settings. " +
-                                       "[bold]oventracker ports[/] lists the serial ports; give one with [bold]--port COMn[/].");
-                return 1;
-            }
-            settings.LastPort = found.Port;
-            settings.Save();
-            meter = found.Meter;
-            identity = found.Identity!;
-            AnsiConsole.MarkupLine($"[green]Connected[/] to {Markup.Escape(identity.ToString())} on {Markup.Escape(found.Port)}.");
+            appSettings.Remember(driver.Name, found.Resource);
+            appSettings.Save();
+            AnsiConsole.MarkupLine($"[green]Connected[/] to {Markup.Escape(identity.ToString())} on {Markup.Escape(found.Resource)}.");
 
-            var config = meter.ReadConfig();
-            if (!config.IsTemperature)
+            config = meter.ReadConfig();
+            if (config is { IsTemperature: false })
             {
-                await AnsiConsole.Status().StartAsync($"The meter is on {Markup.Escape(config.Raw)}. Turn the dial to temperature (°C/°F) with the thermocouple plugged in…", async _ =>
+                await AnsiConsole.Status().StartAsync($"The meter is on {Markup.Escape(config.Description)}. {Markup.Escape(driver.NotTemperatureHelp)}", async _ =>
                 {
-                    while (!config.IsTemperature && !ct.IsCancellationRequested)
+                    while (config is { IsTemperature: false } && !ct.IsCancellationRequested)
                     {
                         await Task.Delay(1500, ct);
                         config = await Task.Run(meter.ReadConfig, ct);
                     }
                 });
             }
-            AnsiConsole.MarkupLine($"Meter mode {Markup.Escape(config.Raw)}" + (meter.ReadBatteryPercent() is { } b ? $", battery {b.ToString("F0", Inv)} %." : "."));
+            var about = new List<string>();
+            if (config is not null) about.Add($"Meter set to {Markup.Escape(config.Description)}");
+            if (meter.ReadBatteryPercent() is { } b) about.Add($"battery {b.ToString("F0", Inv)} %");
+            if (about.Count > 0) AnsiConsole.MarkupLine(string.Join(", ", about) + ".");
             var first = meter.Read();
             if (first.Status == ReadingStatus.Overload)
-                AnsiConsole.MarkupLine("[yellow]The meter reads OL: the thermocouple isn't connected (or is broken).[/]");
+                AnsiConsole.MarkupLine("[yellow]The meter reads OL: the probe isn't connected (or is broken).[/]");
             else if (first.Celsius is { } c0)
-                AnsiConsole.MarkupLine($"Thermocouple reads {c0.ToString("F1", Inv)} °C now.");
+                AnsiConsole.MarkupLine($"The probe reads {c0.ToString("F1", Inv)} °C now.");
         }
+        var oven = meter as IOvenSimulation;
         AnsiConsole.WriteLine();
 
         // 2. What to test.
@@ -238,14 +251,15 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
         if (!s.Yes && !await new ConfirmationPrompt("Ready to start?").ShowAsync(AnsiConsole.Console, ct)) return 0;
 
         var outDir = s.Out ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "OvenTracker", DateTime.Now.ToString("yyyy-MM-dd HHmm", Inv));
-        var info = new SessionInfo(Version, DateTimeOffset.Now, $"{identity.Manufacturer} {identity.Model}", meter.Location, unit, toleranceC, options, plan);
+        var info = new SessionInfo(Version, DateTimeOffset.Now, $"{identity.Manufacturer} {identity.Model}", meter.Location, unit, toleranceC, options, plan,
+            driver.Name, identity, config?.Sensor);
         using var recorder = new RunRecorder(outDir, info);
-        using var poller = new MeterPoller(meter, TimeSpan.FromSeconds(s.Interval), s.Simulate ? s.Speed : 1, connected: true);
+        using var poller = new MeterPoller(meter, TimeSpan.FromSeconds(s.Interval), driver.IsSimulation ? s.Speed : 1, connected: true);
         poller.Start();
 
         var results = new List<PointResult>();
-        var meterLabel = s.Simulate ? "simulated U1253B" : $"{identity.Model} on {meter.Location}";
-        var tracker = new PointTracker(poller, recorder, f, options, toleranceC, meterLabel, plan.Count, s.Simulate);
+        var meterLabel = driver.IsSimulation ? "simulated meter" : $"{identity.Model} on {meter.Location}";
+        var tracker = new PointTracker(poller, recorder, f, options, toleranceC, meterLabel, driver.NotTemperatureHelp, plan.Count, driver.IsSimulation);
         try
         {
             foreach (var point in plan)
@@ -259,7 +273,7 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
                 if (choice == "Finish the session") break;
                 if (choice == "Skip this setpoint") continue;
 
-                oven?.Set(point.Mode, point.SetpointC);
+                oven?.SetOven(point.Mode, point.SetpointC);
                 DrainIdle(poller, recorder);
                 var (result, outcome) = await tracker.RunAsync(point, ct);
                 results.Add(result);
@@ -275,7 +289,7 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
         }
         finally
         {
-            oven?.Set(OvenMode.Bake, null);
+            oven?.SetOven(OvenMode.Bake, null);
             poller.Stop();
             DrainIdle(poller, recorder);
             meter.Dispose();
@@ -289,6 +303,15 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
         AnsiConsole.MarkupLine($"Saved to [link]{Markup.Escape(outDir)}[/]: report.md, results.json and readings.csv.");
         AnsiConsole.MarkupLine("[grey]Turn the oven off.[/]");
         return 0;
+    }
+
+    /// <summary>The driver to use: the one asked for, or the one that answered last time, or the default.</summary>
+    public static IMeterDriver ChooseDriver(RunSettings s, AppSettings settings)
+    {
+        if (s.Simulate) return MeterDrivers.Find(SimulatedDriver.DriverName)!;
+        if (MeterDrivers.Find(s.Meter) is { } asked) return asked;
+        if (MeterDrivers.Find(settings.LastMeter) is { IsSimulation: false } last) return last;
+        return MeterDrivers.Find(MeterDrivers.DefaultName)!;
     }
 
     static void DrainIdle(MeterPoller poller, RunRecorder recorder)

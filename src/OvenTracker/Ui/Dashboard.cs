@@ -14,6 +14,7 @@ public sealed record DashboardModel(
     UnitFormatter Format,
     MeterPoller Poller,
     string MeterLabel,
+    string NotTemperatureHint,
     double ToleranceC,
     ChartView View,
     ReadingStatus? LastStatus,
@@ -64,8 +65,8 @@ public static class Dashboard
             : "[grey]waiting for a reading…[/]";
         var status = m.LastStatus switch
         {
-            ReadingStatus.Overload => "   [red]Probe open (OL): check the thermocouple is plugged in[/]",
-            ReadingStatus.NotTemperature => "   [red]Meter is not on temperature: turn the dial to °C/°F[/]",
+            ReadingStatus.Overload => "   [red]Probe open (OL): check the probe is plugged in[/]",
+            ReadingStatus.NotTemperature => $"   [red]The meter is not measuring temperature.{(m.NotTemperatureHint.Length > 0 ? " " + Markup.Escape(m.NotTemperatureHint) : "")}[/]",
             ReadingStatus.Error => "   [red]Meter sent something unexpected[/]",
             _ => "",
         };

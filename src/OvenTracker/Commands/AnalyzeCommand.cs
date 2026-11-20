@@ -45,7 +45,7 @@ public sealed class AnalyzeCommand : Command<AnalyzeSettings>
         var sessionPath = System.IO.Path.Combine(dir, "session.json");
         var info = File.Exists(sessionPath)
             ? JsonSerializer.Deserialize<SessionInfo>(File.ReadAllText(sessionPath), Json.Options)!
-            : new SessionInfo(RunCommand.Version, File.GetCreationTime(csv), "U1253B", "?", TempUnit.Fahrenheit, 15 / 1.8, new AnalysisOptions(), []);
+            : new SessionInfo(RunCommand.Version, File.GetCreationTime(csv), "unknown meter", "?", TempUnit.Fahrenheit, 15 / 1.8, new AnalysisOptions(), []);
         var f = new UnitFormatter(info.Unit);
         var options = info.Options;
         if (s.Precision is { } p) options = options with { PrecisionC = f.DeltaFromDisplay(p) };

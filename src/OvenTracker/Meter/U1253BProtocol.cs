@@ -32,7 +32,10 @@ public static class U1253BProtocol
         return s.Length is >= 2 and <= 3 && s[0] == '*' && !IsCommandError(s);
     }
 
-    /// <summary>Parses a CONF? reply. Temperature on a U1253B reads <c>"TEMP:K CEL"</c> or <c>"TEMP:K FAR"</c>.</summary>
+    /// <summary>
+    /// Parses a CONF? reply. Temperature on a U1253B reads <c>"TEMP:K CEL"</c> or <c>"TEMP:K FAR"</c>
+    /// (<c>T1:K</c> on some U1250 models); the letter after the colon is the thermocouple type.
+    /// </summary>
     public static MeterConfig ParseConfig(string reply)
     {
         var s = reply.Trim().Trim('"').Trim();
@@ -46,7 +49,9 @@ public static class U1253BProtocol
             if (p.Equals("CEL", StringComparison.OrdinalIgnoreCase)) unit = TempUnit.Celsius;
             else if (p.StartsWith("FA", StringComparison.OrdinalIgnoreCase)) unit = TempUnit.Fahrenheit;
         }
-        return new MeterConfig(reply.Trim(), function, isTemp, unit);
+        var colon = function.IndexOf(':');
+        var sensor = isTemp && colon >= 0 ? Sensor.Thermocouple(function[(colon + 1)..]) : null;
+        return new MeterConfig(s, isTemp, unit, sensor);
     }
 
     public static MeterIdentity ParseIdentity(string reply)

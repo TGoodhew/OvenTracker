@@ -12,9 +12,7 @@ namespace OvenTracker.Meter;
 /// </param>
 public sealed record PortInfo(string Port, string Description, bool IsBluetooth, bool IsBluetoothOutgoing, string? BluetoothAddress);
 
-/// <param name="Meter">Still connected, when the probe was asked to keep it open.</param>
-public sealed record ProbeResult(string Port, MeterIdentity? Identity, string? Error, U1253BMeter? Meter = null);
-
+/// <summary>The serial ports Windows knows, and which are outgoing Bluetooth links. Used by serial-port drivers.</summary>
 public static partial class PortFinder
 {
     [GeneratedRegex(@"\((COM\d+)\)", RegexOptions.IgnoreCase)]
@@ -56,44 +54,5 @@ public static partial class PortFinder
             yield return new PortInfo(m.Groups[1].Value.ToUpperInvariant(), name.Replace(m.Value, "").Trim(), isBt, outgoing,
                 addr is null ? null : string.Join(":", Enumerable.Range(0, 6).Select(i => addr.Substring(i * 2, 2))));
         }
-    }
-
-    /// <param name="keepOpen">Hand back the connected meter instead of closing it: reopening a Bluetooth port straight away can fail.</param>
-    public static ProbeResult Probe(string port, bool keepOpen = false)
-    {
-        var meter = new U1253BMeter(port);
-        try
-        {
-            var id = meter.Connect();
-            if (keepOpen && id.Model.StartsWith("U12", StringComparison.OrdinalIgnoreCase)) return new ProbeResult(port, id, null, meter);
-            meter.Dispose();
-            return new ProbeResult(port, id, null);
-        }
-        catch (Exception ex)
-        {
-            meter.Dispose();
-            return new ProbeResult(port, null, ex is TimeoutException ? "no reply" : ex.Message);
-        }
-    }
-
-    /// <summary>
-    /// Finds the meter: the port that worked last time, then each outgoing Bluetooth port. Other
-    /// serial ports are only tried when <paramref name="includeAll"/> is set, since writing to an
-    /// unknown serial device is not always harmless.
-    /// </summary>
-    public static ProbeResult? Find(string? preferred, bool includeAll, Action<string>? progress = null, bool keepOpen = false)
-    {
-        var ports = List();
-        var order = new List<string>();
-        if (!string.IsNullOrWhiteSpace(preferred)) order.Add(preferred.ToUpperInvariant());
-        order.AddRange(ports.Where(p => p.IsBluetoothOutgoing).Select(p => p.Port));
-        if (includeAll) order.AddRange(ports.Select(p => p.Port));
-        foreach (var port in order.Distinct(StringComparer.OrdinalIgnoreCase))
-        {
-            progress?.Invoke(port);
-            var r = Probe(port, keepOpen);
-            if (r.Identity is { } id && id.Model.StartsWith("U12", StringComparison.OrdinalIgnoreCase)) return r;
-        }
-        return null;
     }
 }

@@ -68,28 +68,52 @@ public sealed class SimulatedOven(int seed = 1)
     }
 }
 
-/// <summary>A pretend U1253B reading <see cref="SimulatedOven"/>, on a simulated clock.</summary>
-public sealed class SimulatedMeter(SimulatedOven oven, double intervalSeconds) : ITemperatureMeter
+/// <summary>A pretend thermocouple meter reading <see cref="SimulatedOven"/>, on a simulated clock.</summary>
+public sealed class SimulatedMeter(SimulatedOven oven, double intervalSeconds) : ITemperatureMeter, IOvenSimulation
 {
     DateTimeOffset clock = DateTimeOffset.UtcNow;
-    static readonly MeterConfig Config = U1253BProtocol.ParseConfig("\"TEMP:K CEL\"");
+    static readonly MeterConfig Config = new("type K, °C (simulated)", true, TempUnit.Celsius, Sensor.Thermocouple("K"));
 
     public SimulatedOven Oven => oven;
     public string Location => "simulator";
 
-    public MeterIdentity Connect() => new("Simulated", "U1253B", "SIM00001", "0.00");
+    public MeterIdentity Connect() => new("OvenTracker", "simulated meter", "SIM00001", "0.00");
     public void Disconnect() { }
     public MeterConfig ReadConfig() => Config;
+    public MeterConfig LastConfig => Config;
 
     public MeterReading Read()
     {
         oven.Step(intervalSeconds);
         clock = clock.AddSeconds(intervalSeconds);
         var v = Math.Round(oven.ProbeC(), 1);
-        return U1253BProtocol.ToReading(clock, v.ToString("+0.00000000E+00;-0.00000000E+00", System.Globalization.CultureInfo.InvariantCulture), Config);
+        return new MeterReading(clock, ReadingStatus.Ok, v, v.ToString("F1", System.Globalization.CultureInfo.InvariantCulture));
     }
 
     public double? ReadBatteryPercent() => 81.4;
-    public void Beep() { }
+    public void SetOven(OvenMode mode, double? setpointC) => oven.Set(mode, setpointC);
     public void Dispose() { }
+}
+
+/// <summary>A made-up oven and meter, so the whole app can be tried without either.</summary>
+public sealed class SimulatedDriver : IMeterDriver
+{
+    public const string DriverName = "simulated";
+
+    public string Name => DriverName;
+    public string Description => "a simulated oven and meter";
+    public string ResourceHelp => "nothing (there is only one)";
+    public bool IsSimulation => true;
+    public string NotFoundHelp => "";
+    public string NotTemperatureHelp => "";
+
+    public ProbeResult? Open(MeterRequest request)
+    {
+        var meter = new SimulatedMeter(new SimulatedOven(Environment.TickCount), request.IntervalSeconds);
+        return new ProbeResult(meter.Location, meter.Connect(), null, meter);
+    }
+
+    public IReadOnlyList<MeterCandidate> Discover() => [new("simulator", "Simulated oven and meter", null, true)];
+
+    public ProbeResult Probe(string resource) => new(resource, new SimulatedMeter(new SimulatedOven(), 1).Connect(), null);
 }

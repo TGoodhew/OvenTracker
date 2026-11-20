@@ -208,7 +208,7 @@ public sealed class Report(SessionInfo info, IReadOnlyList<PointResult> results)
         sb.AppendLine("## How far to trust it");
         sb.AppendLine();
         var top = results.Count > 0 ? results.Max(r => r.Point.SetpointC) : 200;
-        sb.AppendLine($"- The ±95 % column is the statistical uncertainty only. The thermocouple itself adds its own: a standard-grade type K is good to the greater of ±2.2 °C (±4 °F) and ±0.75 % of the temperature, ±{f.Span(SessionSummary.TypeKStandardLimitC(top))} at {f.Setpoint(top)}, and the meter's thermocouple accuracy (in its data sheet) adds to that. An offset smaller than these may be the probe, not the oven.");
+        sb.AppendLine($"- {SensorAccuracy(top)}");
         sb.AppendLine("- The probe measures the air where you put it. Ovens are hotter near the elements and walls, so keep it in the centre for every run if you want to compare runs.");
         sb.AppendLine("- If your oven converts convection temperatures down automatically (often by 25 °F / 15 °C), the convection setting entered here should be the one the oven actually targets.");
         sb.AppendLine();
@@ -216,7 +216,21 @@ public sealed class Report(SessionInfo info, IReadOnlyList<PointResult> results)
         return sb.ToString();
     }
 
-    static void Table(StringBuilder sb, IReadOnlyList<string> headers, IEnumerable<string[]> rows)
+    /// <summary>What the sensor and meter add to the statistical uncertainty, at the highest setpoint.</summary>
+    public string SensorAccuracy(double topC)
+    {
+        const string start = "The ±95 % column is the statistical uncertainty only. ";
+        const string end = "An offset smaller than these may be the probe, not the oven.";
+        if (info.Sensor is not { } s)
+            return start + "The probe and the meter each add their own error, given in their data sheets. " + end;
+        var limit = s.LimitsAdd
+            ? $"±{f.Span(s.LimitC)} plus {(s.LimitFraction * 100).ToString("0.###", Inv)} % of the temperature"
+            : $"the greater of ±{f.Span(s.LimitC)} and ±{(s.LimitFraction * 100).ToString("0.###", Inv)} % of the temperature";
+        return start + $"The probe itself adds its own: a standard-grade {s.Name} is good to {limit}, ±{f.Span(s.ToleranceC(topC))} at {f.Setpoint(topC)}, " +
+               "and the meter's own accuracy (in its data sheet) adds to that. " + end;
+    }
+
+    static void Table(StringBuilder sb,IReadOnlyList<string> headers, IEnumerable<string[]> rows)
     {
         sb.AppendLine("| " + string.Join(" | ", headers) + " |");
         sb.AppendLine("|" + string.Concat(headers.Select(_ => " --- |")));

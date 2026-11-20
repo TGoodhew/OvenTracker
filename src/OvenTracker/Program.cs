@@ -22,10 +22,12 @@ app.Configure(config =>
         .WithDescription("Measure the oven at each setpoint, in bake and convection (the default).")
         .WithExample("run")
         .WithExample("run", "--unit", "F", "--modes", "bake,convection", "--setpoints", "350,400,450")
+        .WithExample("run", "--meter", "u1253b", "--resource", "COM5")
         .WithExample("run", "--simulate", "--speed", "120");
-    config.AddCommand<PortsCommand>("ports")
-        .WithDescription("List serial ports, and find which one is the U1177A.")
-        .WithExample("ports", "--probe");
+    config.AddCommand<MetersCommand>("meters")
+        .WithAlias("ports")
+        .WithDescription("List the meters each kind of meter's driver can see, and which one answers.")
+        .WithExample("meters", "--probe");
     config.AddCommand<AnalyzeCommand>("analyze")
         .WithDescription("Re-run the analysis over a saved run.")
         .WithExample("analyze", "\"Documents\\OvenTracker\\2026-11-20 1400\"", "--tolerance", "10");

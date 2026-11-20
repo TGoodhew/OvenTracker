@@ -8,8 +8,8 @@ namespace OvenTracker.Session;
 public enum LinkState { Connecting, Connected, Reconnecting, Stopped }
 
 /// <summary>
-/// Reads the meter on its own thread, at a steady interval, and survives the Bluetooth link
-/// dropping: it reconnects and carries on, and the gap simply has no readings in it.
+/// Reads the meter on its own thread, at a steady interval, and survives the link dropping (a
+/// Bluetooth link will): it reconnects and carries on, and the gap simply has no readings in it.
 /// </summary>
 public sealed class MeterPoller : IDisposable
 {
@@ -79,7 +79,7 @@ public sealed class MeterPoller : IDisposable
                 var r = meter.Read();
                 ReadCount++;
                 failures = 0;
-                if (r.Status != ReadingStatus.Error) Config = meter.ReadConfigCached();
+                if (r.Status != ReadingStatus.Error) Config = meter.LastConfig;
                 readings.Writer.TryWrite(r);
             }
             catch (Exception ex) when (!token.IsCancellationRequested)
@@ -119,14 +119,4 @@ public sealed class MeterPoller : IDisposable
         Stop();
         cts.Dispose();
     }
-}
-
-static class MeterExtensions
-{
-    /// <summary>The configuration the meter last reported, without another round trip where it keeps one.</summary>
-    public static MeterConfig? ReadConfigCached(this ITemperatureMeter meter) => meter switch
-    {
-        U1253BMeter u => u.LastConfig,
-        _ => meter.ReadConfig(),
-    };
 }

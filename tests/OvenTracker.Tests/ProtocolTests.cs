@@ -13,10 +13,13 @@ public class ProtocolTests
         var c = U1253BProtocol.ParseConfig("\"TEMP:K CEL\"");
         Assert.True(c.IsTemperature);
         Assert.Equal(TempUnit.Celsius, c.Unit);
-        Assert.Equal("TEMP:K", c.Function);
+        Assert.Equal("TEMP:K CEL", c.Description);
+        Assert.Equal("type K thermocouple", c.Sensor?.Name);
 
         Assert.Equal(TempUnit.Fahrenheit, U1253BProtocol.ParseConfig("\"TEMP:K FAR\"").Unit);
         Assert.True(U1253BProtocol.ParseConfig("\"T1:K CEL\"").IsTemperature);
+        Assert.Equal("type J thermocouple", U1253BProtocol.ParseConfig("\"TEMP:J CEL\"").Sensor?.Name);
+        Assert.Null(U1253BProtocol.ParseConfig("\"VOLT:DC +5.000000E+00,+1.000000E-04\"").Sensor);
     }
 
     [Theory]

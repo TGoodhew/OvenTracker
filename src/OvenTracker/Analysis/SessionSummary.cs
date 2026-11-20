@@ -85,7 +85,4 @@ public static class SessionSummary
         }
         return list;
     }
-
-    /// <summary>Type K standard limits of error (ASTM E230): the greater of 2.2 °C and 0.75 % of the temperature.</summary>
-    public static double TypeKStandardLimitC(double c) => Math.Max(2.2, 0.0075 * Math.Abs(c));
 }
