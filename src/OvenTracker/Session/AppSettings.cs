@@ -35,6 +35,18 @@ public sealed class AppSettings
         if (!IsAutoPowerOffTurnedOff(meterKey)) AutoPowerOffTurnedOff.Add(meterKey);
     }
 
+    /// <summary>Each driver's --meter-option settings, as last used, e.g. "34401a" → rtd=pt100-b.</summary>
+    public Dictionary<string, Dictionary<string, string>> MeterOptions { get; set; } = [];
+
+    public IReadOnlyDictionary<string, string> MeterOptionsFor(string driver) =>
+        MeterOptions.TryGetValue(driver, out var o) ? o : new Dictionary<string, string>();
+
+    public void RememberMeterOptions(string driver, IReadOnlyDictionary<string, string> options)
+    {
+        if (options.Count == 0) MeterOptions.Remove(driver);
+        else MeterOptions[driver] = new Dictionary<string, string>(options);
+    }
+
     public void Remember(string driver, string resource)
     {
         LastMeter = driver;

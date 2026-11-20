@@ -14,12 +14,16 @@ namespace OvenTracker.Commands;
 public class RunSettings : SharedSettings
 {
     [CommandOption("--meter <DRIVER>")]
-    [Description("Which kind of meter: u1253b (the default) or simulated. [bold]oventracker meters[/] lists them and what each can see.")]
+    [Description("Which kind of meter: u1253b (the default), 34401a (with a PT100), or simulated. [bold]oventracker meters[/] lists them and what each can see.")]
     public string? Meter { get; set; }
 
     [CommandOption("-r|--resource <WHERE>")]
-    [Description("Where the meter is, in the driver's terms (e.g. COM5 for the U1253B). Found automatically if left out.")]
+    [Description("Where the meter is, in the driver's terms: COM5 for the U1253B (found automatically if left out), GPIB0::22::INSTR or COM3 for the 34401A. Remembered.")]
     public string? Resource { get; set; }
+
+    [CommandOption("--meter-option <KEY=VALUE>")]
+    [Description("A setting for the meter's driver, e.g. rtd=pt100-b or nplc=100 for the 34401A. Repeat it for more than one. Remembered for that meter.")]
+    public string[]? MeterOptions { get; set; }
 
     [CommandOption("-p|--port <PORT>", IsHidden = true)]
     [Description("The same as --resource: the name it had when there was only a serial meter.")]
@@ -112,6 +116,7 @@ public class RunSettings : SharedSettings
         if (Simulate && Meter is not null && MeterDrivers.Find(Meter)?.IsSimulation != true) return ValidationResult.Error("--simulate can't be used with another --meter.");
         if ((Resource ?? Port) is { } where && ResourceSpec.Parse(where) is null)
             return ValidationResult.Error($"--resource \"{where}\" isn't one the app understands. Examples: COM5, COM5:9600,E,7,2 (with serial settings), /dev/ttyUSB0, GPIB0::22::INSTR.");
+        if (MeterDrivers.ParseOptions(MeterOptions) is null) return ValidationResult.Error("--meter-option takes key=value, e.g. --meter-option rtd=pt100-b.");
         if (Port is not null && Resource is not null && !string.Equals(Port, Resource, StringComparison.OrdinalIgnoreCase))
             return ValidationResult.Error("Give the meter's location once, with --resource.");
         if (Unit is not null && Temp.ParseUnit(Unit) is null) return ValidationResult.Error("--unit must be F or C.");
@@ -178,6 +183,14 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
         var ovenProfile = OvenProfiles.Find(s.Oven) ?? resumedOven ?? OvenProfiles.Find(appSettings.LastOven) ?? OvenProfiles.Default;
         var driver = ChooseDriver(s, appSettings);
         var resource = s.Resource ?? s.Port;
+        // The driver's own settings: those given, or the ones used with it last time.
+        var givenOptions = MeterDrivers.ParseOptions(s.MeterOptions)!;
+        var meterOptions = givenOptions.Count > 0 ? givenOptions : appSettings.MeterOptionsFor(driver.Name);
+        if (driver.CheckOptions(meterOptions) is { } badOption)
+        {
+            AnsiConsole.MarkupLine($"[red]{Markup.Escape(badOption)}[/]");
+            return 1;
+        }
         AnsiConsole.Write(new FigletText("OvenTracker").Color(Color.Orange1));
         AnsiConsole.MarkupLine($"[grey]v{Version} · oven temperature accuracy · {Markup.Escape(driver.Description)}[/]");
         AnsiConsole.WriteLine();
@@ -187,7 +200,7 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
         await AnsiConsole.Status().StartAsync("Looking for the meter…", async sc =>
         {
             found = await Task.Run(() => driver.Open(new MeterRequest(resource, appSettings.LastResourceFor(driver.Name), s.Interval,
-                where => sc.Status($"Trying {Markup.Escape(where)}…"))), ct);
+                where => sc.Status($"Trying {Markup.Escape(where)}…"), meterOptions)), ct);
         });
         if (found?.Meter is not { } meter || found.Identity is not { } identity)
         {
@@ -209,6 +222,7 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
         else
         {
             appSettings.Remember(driver.Name, found.Resource);
+            appSettings.RememberMeterOptions(driver.Name, meterOptions);
             appSettings.Save();
             AnsiConsole.MarkupLine($"[green]Connected[/] to {Markup.Escape(identity.ToString())} on {Markup.Escape(found.Resource)}.");
 
