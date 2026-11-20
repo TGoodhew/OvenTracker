@@ -81,6 +81,9 @@ A setpoint is judged **Accurate** when its mean and its ±95 % interval are with
 **Borderline** in between. The thermocouple's own accuracy comes on top of the ±95 % figure, and the
 report spells that out.
 
+[Reading the results and adjusting the oven](docs/adjusting-the-oven.md) explains each column, when an
+offset is worth correcting, and how to enter the correction on a GE Profile PHS925ST1SS.
+
 ## Protocol notes
 
 The U1250 series talks at 9600 baud 8N1 through the U1177A: commands end in LF and replies in CR LF. The
