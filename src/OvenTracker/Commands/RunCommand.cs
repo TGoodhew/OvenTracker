@@ -88,6 +88,15 @@ public sealed class RunSettings : AdjustmentSettings
     [Description("With --simulate, start as if the oven had just been used at this temperature, in the oven's unit.")]
     public double? SimHot { get; set; }
 
+    [CommandOption("--remind <MINUTES>")]
+    [Description("While waiting for the oven to be changed (or turned off), beep again every this many minutes. 0 for no repeats.")]
+    [DefaultValue(1.0)]
+    public double Remind { get; set; } = 1;
+
+    [CommandOption("--sim-forget <N>", IsHidden = true)]
+    [Description("With --simulate, leave the simulated oven at its old setting for setpoint N, as if you'd forgotten to change it.")]
+    public int? SimForget { get; set; }
+
     [CommandOption("--sim-apo <MINUTES>", IsHidden = true)]
     [Description("With --simulate, give the simulated meter an auto power-off after this many minutes (it wakes 2 minutes later).")]
     public double? SimApo { get; set; }
@@ -107,6 +116,7 @@ public sealed class RunSettings : AdjustmentSettings
         if (Interval is < 0.5 or > 30) return ValidationResult.Error("--interval must be between 0.5 and 30 seconds.");
         if (MinCycles is < 2 or > 20) return ValidationResult.Error("--min-cycles must be between 2 and 20.");
         if (MaxMinutes is < 10 or > 600) return ValidationResult.Error("--max-minutes must be between 10 and 600.");
+        if (Remind is < 0 or > 60) return ValidationResult.Error("--remind must be between 0 and 60 minutes.");
         if (Precision is <= 0) return ValidationResult.Error("--precision must be positive.");
         if (Tolerance is <= 0) return ValidationResult.Error("--tolerance must be positive.");
         if (Modes is not null && RunCommand.ParseModes(Modes) is null) return ValidationResult.Error("--modes must be bake, convection, or both.");
@@ -357,6 +367,11 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
         var waiter = new ResetWaiter(poller, recorder, f, ambientC ?? AssumedAmbientC, ambientC is null, driver.IsSimulation, driver.AutoPowerOff);
         var afterReset = resumed is not null; // the first setpoint of a resumed run follows a break
         var stopped = false;
+        var prompt = new ChangePrompt(poller, recorder, f, TimeSpan.FromMinutes(s.Remind));
+        var ask = ChangePrompt.ShouldAsk(s.Yes, driver.IsSimulation, !Console.IsInputRedirected);
+        string? lastDone = null; // what was just finished, for the prompt
+        PointResult? previous = null; // the setpoint just measured in this sitting, if the oven went straight on from it
+        var firstPrompt = true;
         try
         {
             for (var w = 0; w < 50 && poller.LastCelsius is null; w++) await Task.Delay(100, ct); // a first reading, to know how hot the oven is
@@ -366,20 +381,22 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
                 AnsiConsole.Write(new Rule($"[orange1]{point.Index} of {plan.Count}: {Temp.ModeName(point.Mode)} {Markup.Escape(f.Setpoint(point.SetpointC))}[/]").LeftJustified());
                 var label = $"{Temp.ModeName(point.Mode)} {f.Setpoint(point.SetpointC)}";
                 var targetC = ResetWaiter.TargetFor(plan, point, ambientC ?? AssumedAmbientC);
-                string choice;
+                ChangeChoice choice;
                 while (true)
                 {
-                    var hot = poller.LastCelsius is { } nowC && nowC > targetC;
-                    var wait = $"Wait for the oven to cool below {f.T(targetC, 0)} first (it's {f.T(poller.LastCelsius ?? 0, 0)} now)";
-                    var choices = new List<string> { "Start tracking", "Skip this setpoint", "Finish the session" };
-                    if (hot) choices.Insert(afterReset ? 0 : 1, wait);
-                    choice = s.Yes ? (hot && afterReset ? wait : "Start tracking") : await new SelectionPrompt<string>()
-                        .Title(hot && afterReset
-                            ? $"The oven is still hot. For [bold]{Markup.Escape(label)}[/] to start like the others, it should be below {Markup.Escape(f.T(targetC, 0))}:"
-                            : $"Set the oven to [bold]{Temp.ModeName(point.Mode).ToUpperInvariant()} {Markup.Escape(f.Setpoint(point.SetpointC))}[/] and start it, then:")
-                        .AddChoices(choices)
-                        .ShowAsync(AnsiConsole.Console, ct);
-                    if (choice != wait) break;
+                    // Too hot to start from? Going straight on from a setpoint, the oven cycles around it, so allow half its swing.
+                    var hot = poller.LastCelsius is { } nowC && nowC > targetC + (previous?.Metrics.SwingC ?? 0) / 2;
+                    var waitOffer = hot ? $"wait for it to cool below {f.T(targetC, 0)} first" : null;
+                    if (hot && afterReset && s.Yes) choice = ChangeChoice.Wait;   // resumed with --yes: cool first, by itself
+                    else if (!ask) choice = ChangeChoice.Start;                   // the simulator with --yes, or no keyboard
+                    else
+                    {
+                        var heading = hot && afterReset
+                            ? $"THE OVEN IS STILL HOT ({f.T(poller.LastCelsius!.Value, 0)}). PRESS W TO LET IT COOL, OR SET IT TO"
+                            : firstPrompt ? "SET THE OVEN TO" : "CHANGE THE OVEN TO";
+                        choice = await prompt.AskAsync(heading, Temp.ModeName(point.Mode), point.SetpointC, lastDone, waitOffer, ct);
+                    }
+                    if (choice != ChangeChoice.Wait) break;
 
                     if (!s.Yes) AnsiConsole.MarkupLine("[grey]Turn the oven off and leave the door shut.[/]");
                     oven?.SetOven(point.Mode, null);
@@ -387,15 +404,19 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
                     var outcome = await waiter.RunAsync(new ResetTarget(label, targetC), autoCarryOn: s.Yes, ct);
                     if (outcome == ResetOutcome.Quit) { stopped = true; break; }
                     afterReset = true;
-                    if (s.Yes) { choice = "Start tracking"; break; }
+                    previous = null; // the oven has cooled since
+                    lastDone = $"The oven is ready for {label}.";
                 }
-                if (stopped || choice == "Finish the session") { stopped = true; break; }
-                if (choice == "Skip this setpoint") continue;
+                if (stopped || choice == ChangeChoice.Finish) { stopped = true; break; }
+                if (choice == ChangeChoice.Skip) { lastDone = $"{label} skipped."; previous = null; continue; }
+                firstPrompt = false;
 
-                oven?.SetOven(point.Mode, point.SetpointC);
-                DrainIdle(poller, recorder);
+                if (s.SimForget != point.Index) oven?.SetOven(point.Mode, point.SetpointC);
+                var idle = DrainIdle(poller, recorder);
                 if (afterReset) recorder.Note(DateTimeOffset.UtcNow, "reset");
-                var (result, pointOutcome) = await tracker.RunAsync(point, ct);
+                // Where the oven starts from: the setpoint just measured, if it went straight on from it, or its last two minutes.
+                var from = previous?.Metrics.MeanC ?? StartingFrom(idle, poller.LastCelsius);
+                var (result, pointOutcome) = await tracker.RunAsync(point, ct, from, previous?.Metrics.SwingC);
                 result = result with { AfterReset = afterReset };
                 afterReset = false;
                 results.RemoveAll(r => r.Point.Index == point.Index);
@@ -403,8 +424,14 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
                 poller.Enqueue(m => m.Beep());
                 AnsiConsole.Write("\a");
                 ConsoleReport.PointSummary(new Report(info, results), result);
+                lastDone = Done(new Report(info, results), result);
+                previous = result.Metrics.MeanC is not null ? result : null;
                 if (pointOutcome == PointOutcome.Quit) { stopped = true; break; }
             }
+
+            // Finished (or stopped): ask for the oven to be turned off, with the same reminders.
+            if (ask && !driver.IsSimulation && results.Count > 0 && !ct.IsCancellationRequested)
+                await prompt.AskTurnOffAsync(stopped ? "The session is stopped." : "All the setpoints are done.", ct);
         }
         catch (OperationCanceledException)
         {
@@ -524,8 +551,37 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
         return MeterDrivers.Find(MeterDrivers.DefaultName)!;
     }
 
-    static void DrainIdle(MeterPoller poller, RunRecorder recorder)
+    /// <summary>Records the readings that came in between setpoints, and returns them.</summary>
+    static List<MeterReading> DrainIdle(MeterPoller poller, RunRecorder recorder)
     {
-        while (poller.Readings.TryRead(out var r)) recorder.Reading(r, null, null);
+        var list = new List<MeterReading>();
+        while (poller.Readings.TryRead(out var r))
+        {
+            recorder.Reading(r, null, null);
+            list.Add(r);
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// Where the oven was before a setpoint started: the mean of the last two minutes of readings
+    /// between setpoints (an oven cycling on its thermostat swings either side of it), or the latest.
+    /// </summary>
+    public static double? StartingFrom(IReadOnlyList<MeterReading> idle, double? latestC)
+    {
+        var good = idle.Where(r => r is { Status: ReadingStatus.Ok, Celsius: not null }).ToList();
+        if (good.Count == 0) return latestC;
+        var from = good[^1].Time - TimeSpan.FromMinutes(2);
+        return good.Where(r => r.Time >= from).Average(r => r.Celsius!.Value);
+    }
+
+    /// <summary>One line on a finished setpoint, for the prompt.</summary>
+    static string Done(Report report, PointResult r)
+    {
+        var f = report.Format;
+        var name = $"{Temp.ModeName(r.Point.Mode)} {f.Setpoint(r.Point.SetpointC)}";
+        return r.Metrics.OffsetC is { } off
+            ? $"{name} is done: {f.T(r.Metrics.MeanC!.Value)} ({f.D(off)}), {Report.VerdictText(SessionSummary.Judge(r.Metrics, report.Info.ToleranceC))}."
+            : $"{name} is done, without a result.";
     }
 }

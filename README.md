@@ -77,10 +77,21 @@ OvenTracker.exe run --simulate --speed 120   # try it all without the meter or t
 
 1. Hang the thermocouple tip in the centre of the oven, clear of racks and walls, and run the lead out
    under the door seal. Check its insulation is rated for your highest setpoint.
-2. For each setpoint the app asks you to set the oven (e.g. *BAKE 350 °F*) and start it. Then leave the
-   door shut and watch.
+2. For each setpoint the app stops and shows the setting in large letters (e.g. *BAKE 350 °F*). Set the oven
+   and start it, then press **Enter**. Leave the door shut and watch.
 3. When the oven says it has preheated, press **P**. The report shows how true that signal was.
-4. When a setpoint is done the meter beeps, and the app shows the result and asks for the next one.
+4. When a setpoint is done, the meter beeps, the app shows the result, and it stops again with the next
+   setting: *CHANGE THE OVEN TO CONVECTION 350 °F*. Until you press a key, it reminds you every minute (the
+   meter beeps and the PC's bell rings; `--remind <minutes>`, or `--remind 0` for no repeats). It waits like
+   this with a real meter even with `--yes`, since nothing else changes the oven. At the end, it asks you
+   to turn the oven off the same way.
+
+![The prompt between setpoints: the setpoint just finished, and the next setting in large letters](docs/images/change.png)
+
+If the oven doesn't head for the new setting within 6 minutes, the app beeps and asks whether you changed
+it. For example, the setting was raised from 350 to 400 °F, but the oven is still cycling around 350 °F. If
+you hadn't, change it and press **R R** to restart that setpoint. A change of mode at the same temperature
+can't be seen this way, so check the mode on the prompt.
 
 ![The start of a run: what to do before starting, and the plan of setpoints with the modes alternating](docs/images/start.png)
 
