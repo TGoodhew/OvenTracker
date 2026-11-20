@@ -60,6 +60,22 @@ public sealed record Residual(OvenMode Mode, double SetpointC, double NowC, doub
 /// <summary>After adjusting, what to set to get a temperature, where the adjustment leaves it out.</summary>
 public sealed record DialCorrection(OvenMode Mode, double WantC, double SetC);
 
+/// <summary>Where a mode's gain came from.</summary>
+public enum GainSource
+{
+    /// <summary>Measured by these runs: the same setpoints at different adjustments.</summary>
+    Measured,
+
+    /// <summary>From the oven's profile, measured before by characterise.</summary>
+    Profile,
+
+    /// <summary>Assumed (1:1, or the oven's own error slope with --adjust-model gain).</summary>
+    Assumed,
+}
+
+/// <summary>How far one degree of adjustment moves the oven in one mode, and how that's known.</summary>
+public sealed record ModeGain(double Gain, GainSource Source, double? HalfWidth);
+
 /// <param name="ChangeC">How much to change the adjustment by.</param>
 /// <param name="CurrentC">The adjustment the oven has now, if the run recorded it.</param>
 /// <param name="NewSettingC">What to set the adjustment to, when the current one is known.</param>
@@ -72,6 +88,7 @@ public sealed record DialCorrection(OvenMode Mode, double WantC, double SetC);
 /// <param name="AddSetpointsC">Setpoints worth adding to tell a fixed offset from one that changes with temperature.</param>
 /// <param name="TooFewSetpoints">Why the setpoints can't show the error's shape, when they can't.</param>
 /// <param name="Curved">The error bends with temperature, more than a straight line explains.</param>
+/// <param name="Gains">Each mode's gain and where it came from. <see cref="Gain"/> is their mean.</param>
 public sealed record AdjustmentAdvice(
     double ChangeC,
     double? CurrentC,
@@ -87,7 +104,8 @@ public sealed record AdjustmentAdvice(
     IReadOnlyList<double> AddSetpointsC,
     string? TooFewSetpoints,
     bool Curved,
-    bool GainFromProfile = false)
+    bool GainFromProfile = false,
+    IReadOnlyDictionary<OvenMode, ModeGain>? Gains = null)
 {
     public double WorstAfterC => Residuals.Count == 0 ? 0 : Residuals.Max(r => Math.Abs(r.AfterC));
 }
@@ -123,90 +141,120 @@ public static class AdjustmentAdvisor
     static AdjustmentAdvice AdviseGroup(IReadOnlyList<AdjustPoint> points, AdjustmentOptions options, double? currentC, OvenMode? mode)
     {
         var reference = currentC ?? points[^1].AdjustmentC;
-        var (gain, measured, gainHw, fromProfile) = Gain(points, options);
+        var gains = Gains(points, options);
+        double G(OvenMode m) => gains[m].Gain;
 
         // Every setpoint's error as it would be at the reference adjustment, repeats averaged.
         var now = points
-            .Select(p => p with { OffsetC = p.OffsetC + gain * (reference - p.AdjustmentC), AdjustmentC = reference })
+            .Select(p => p with { OffsetC = p.OffsetC + G(p.Mode) * (reference - p.AdjustmentC), AdjustmentC = reference })
             .GroupBy(p => (p.Mode, Key: Math.Round(p.SetpointC / SameSetpointC)))
             .Select(g => new AdjustPoint(g.Key.Mode, g.Average(p => p.SetpointC), g.Average(p => p.OffsetC),
                 g.All(p => p.HalfWidthC is not null) ? Math.Sqrt(g.Sum(p => p.HalfWidthC!.Value * p.HalfWidthC.Value)) / g.Count() : null, reference))
             .OrderBy(p => p.Mode).ThenBy(p => p.SetpointC)
             .ToList();
 
-        var change = Best(now, options, gain);
-        var clamped = false;
         var lo = -options.RangeC - (currentC ?? 0);
         var hi = options.RangeC - (currentC ?? 0);
-        if (change < lo - 1e-9 || change > hi + 1e-9)
-        {
-            clamped = true;
-            change = Math.Clamp(change, SnapUp(lo, options.StepC), SnapDown(hi, options.StepC));
-        }
+        var (change, clamped) = Best(now, options, G, lo, hi);
 
-        var residuals = now.Select(p => new Residual(p.Mode, p.SetpointC, p.OffsetC, p.OffsetC + gain * change, p.HalfWidthC)).ToList();
+        var residuals = now.Select(p => new Residual(p.Mode, p.SetpointC, p.OffsetC, p.OffsetC + G(p.Mode) * change, p.HalfWidthC)).ToList();
+        var used = gains.Values.ToList();
+        var measured = used.All(g => g.Source == GainSource.Measured);
+        var hw = used.Count == 1 ? used[0].HalfWidth
+            : used.All(g => g.HalfWidth is not null) ? Math.Sqrt(used.Sum(g => g.HalfWidth!.Value * g.HalfWidth.Value)) / used.Count : null;
         return new AdjustmentAdvice(
-            change, currentC, currentC is { } c ? c + change : null, clamped, gain, measured, gainHw, options, mode,
-            residuals, DialCorrections(residuals), AddSetpoints(now, out var why), why, IsCurved(now), fromProfile);
+            change, currentC, currentC is { } c ? c + change : null, clamped, used.Average(g => g.Gain), measured, measured ? hw : null, options, mode,
+            residuals, DialCorrections(residuals), AddSetpoints(now, out var why), why, IsCurved(now),
+            !measured && used.Any(g => g.Source == GainSource.Profile), gains);
     }
 
     /// <summary>
-    /// How far the oven moves per degree of adjustment. Measured, from the same setpoint run at
-    /// different adjustments, when there are such pairs; otherwise assumed from the model.
+    /// How far the oven moves per degree of adjustment, for each mode: measured, from the same setpoint run
+    /// at different adjustments, when there are such pairs; otherwise the oven profile's measured gain;
+    /// otherwise assumed from the model.
     /// </summary>
-    static (double Gain, bool Measured, double? HalfWidth, bool FromProfile) Gain(IReadOnlyList<AdjustPoint> points, AdjustmentOptions options)
+    public static IReadOnlyDictionary<OvenMode, ModeGain> Gains(IReadOnlyList<AdjustPoint> points, AdjustmentOptions options)
     {
-        double num = 0, den = 0, variance = 0;
-        foreach (var g in points.GroupBy(p => (p.Mode, Key: Math.Round(p.SetpointC / SameSetpointC))))
+        var result = new Dictionary<OvenMode, ModeGain>();
+        foreach (var modeGroup in points.GroupBy(p => p.Mode))
         {
-            var list = g.ToList();
-            for (var i = 0; i < list.Count; i++)
-                for (var j = i + 1; j < list.Count; j++)
-                {
-                    var dk = list[j].AdjustmentC - list[i].AdjustmentC;
-                    if (Math.Abs(dk) < 2 * options.StepC - 1e-9) continue; // too small a change to measure anything
-                    num += (list[j].OffsetC - list[i].OffsetC) * dk;
-                    den += dk * dk;
-                    var hw = Math.Pow(list[i].HalfWidthC ?? 1, 2) + Math.Pow(list[j].HalfWidthC ?? 1, 2);
-                    variance += hw * dk * dk;
-                }
+            double num = 0, den = 0, variance = 0;
+            foreach (var g in modeGroup.GroupBy(p => Math.Round(p.SetpointC / SameSetpointC)))
+            {
+                var list = g.ToList();
+                for (var i = 0; i < list.Count; i++)
+                    for (var j = i + 1; j < list.Count; j++)
+                    {
+                        var dk = list[j].AdjustmentC - list[i].AdjustmentC;
+                        if (Math.Abs(dk) < 2 * options.StepC - 1e-9) continue; // too small a change to measure anything
+                        num += (list[j].OffsetC - list[i].OffsetC) * dk;
+                        den += dk * dk;
+                        var pairHw = Math.Pow(list[i].HalfWidthC ?? 1, 2) + Math.Pow(list[j].HalfWidthC ?? 1, 2);
+                        variance += pairHw * dk * dk;
+                    }
+            }
+            if (den > 0)
+            {
+                result[modeGroup.Key] = new ModeGain(num / den, GainSource.Measured, Math.Sqrt(variance) / den);
+                continue;
+            }
+            if (options.KnownGains is { } known && known.TryGetValue(modeGroup.Key, out var k))
+            {
+                result[modeGroup.Key] = new ModeGain(k, GainSource.Profile, null);
+                continue;
+            }
+            var assumed = 1.0;
+            if (options.Model == AdjustModel.Gain)
+            {
+                var list = modeGroup.ToList();
+                var fit = Stats.Fit(list.Select(p => p.SetpointC).ToList(), list.Select(p => p.SetpointC + p.OffsetC).ToList());
+                if (fit is { Slope: > 0.5 and < 1.5 }) assumed = fit.Slope;
+            }
+            result[modeGroup.Key] = new ModeGain(assumed, GainSource.Assumed, null);
         }
-        if (den > 0) return (num / den, true, Math.Sqrt(variance) / den, false);
-
-        // Measured on this oven before: the profile's gains for the modes here (their mean, when they share one adjustment).
-        if (options.KnownGains is { } known && points.Select(p => p.Mode).Distinct().Where(known.ContainsKey).ToList() is { Count: > 0 } modes)
-            return (modes.Average(m => known[m]), false, null, true);
-
-        if (options.Model == AdjustModel.Gain)
-        {
-            var fit = Stats.Fit(points.Select(p => p.SetpointC).ToList(), points.Select(p => p.SetpointC + p.OffsetC).ToList());
-            if (fit is { Slope: > 0.5 and < 1.5 }) return (fit.Slope, false, null, false);
-        }
-        return (1, false, null, false);
+        return result;
     }
 
-    /// <summary>The change that best meets the objective, on the oven's steps.</summary>
-    static double Best(IReadOnlyList<AdjustPoint> now, AdjustmentOptions options, double gain)
+    /// <summary>
+    /// The change that best meets the objective, on the oven's steps and within its range, and whether the
+    /// range cut it short. Each setpoint moves by its own mode's gain, so a shared adjustment weighs the
+    /// modes by how much each one moves. The steps are searched outright: few enough, and exact for either objective.
+    /// </summary>
+    static (double Change, bool Clamped) Best(IReadOnlyList<AdjustPoint> now, AdjustmentOptions options, Func<OvenMode, double> gain, double lo, double hi)
     {
-        if (gain <= 0.05) return 0; // the adjustment doesn't move the oven: nothing to recommend
+        if (now.All(p => gain(p.Mode) <= 0.05)) return (0, false); // the adjustment doesn't move the oven: nothing to recommend
+        var step = options.StepC;
         if (options.FavourC is { } favour)
         {
-            var at = ErrorAt(now, favour);
-            return Snap(-at / gain, options.StepC);
+            var g = now.Average(p => gain(p.Mode));
+            var wanted = Snap(-ErrorAt(now, favour) / g, step);
+            var allowed = Math.Clamp(wanted, SnapUp(lo, step), SnapDown(hi, step));
+            return (allowed, Math.Abs(allowed - wanted) > 1e-9);
         }
 
-        var offsets = now.Select(p => p.OffsetC).ToList();
-        var ideal = options.Objective == AdjustObjective.Minimax
-            ? -(offsets.Max() + offsets.Min()) / 2 / gain
-            : -offsets.Average() / gain;
-        // The objective is convex, so the best step is on one side of the ideal or the other.
-        var down = SnapDown(ideal, options.StepC);
-        var up = SnapUp(ideal, options.StepC);
         double Cost(double change) => options.Objective == AdjustObjective.Minimax
-            ? offsets.Max(o => Math.Abs(o + gain * change))
-            : offsets.Sum(o => (o + gain * change) * (o + gain * change));
-        var (a, b) = (Cost(down), Cost(up));
-        return Math.Abs(a - b) < 1e-9 ? (Math.Abs(down) <= Math.Abs(up) ? down : up) : a < b ? down : up;
+            ? now.Max(p => Math.Abs(p.OffsetC + gain(p.Mode) * change))
+            : now.Sum(p => Math.Pow(p.OffsetC + gain(p.Mode) * change, 2));
+
+        // The best step anywhere (well beyond the range, to see whether the range cuts it short), then within it.
+        double BestIn(double from, double to)
+        {
+            var best = 0.0;
+            var bestCost = double.PositiveInfinity;
+            for (var k = (long)Math.Ceiling(from / step - 1e-9); k <= (long)Math.Floor(to / step + 1e-9); k++)
+            {
+                var change = k * step;
+                var cost = Cost(change);
+                // On a tie, the smaller change.
+                if (cost < bestCost - 1e-9 || (Math.Abs(cost - bestCost) <= 1e-9 && Math.Abs(change) < Math.Abs(best)))
+                    (best, bestCost) = (change, cost);
+            }
+            return best;
+        }
+        var reach = 4 * options.RangeC + now.Max(p => Math.Abs(p.OffsetC)) / Math.Max(0.05, now.Min(p => gain(p.Mode)));
+        var anywhere = BestIn(-reach, reach);
+        var inRange = BestIn(lo, hi);
+        return (inRange, anywhere < lo - 1e-9 || anywhere > hi + 1e-9);
     }
 
     /// <summary>The error at a temperature: from a straight line through the setpoints, or their mean with only one.</summary>

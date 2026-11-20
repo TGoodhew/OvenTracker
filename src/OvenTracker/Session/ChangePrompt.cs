@@ -46,6 +46,15 @@ public sealed class ChangePrompt(MeterPoller poller, RunRecorder recorder, UnitF
         return result ?? ChangeChoice.Finish;
     }
 
+    /// <summary>
+    /// Characterise: asks for the oven's adjustment to be changed, with the steps in <paramref name="done"/>,
+    /// reminding until Enter (true) or F (false, to carry on later).
+    /// </summary>
+    public async Task<bool> AskToSetAdjustmentAsync(string done, string toText, CancellationToken ct) =>
+        await WaitForKeyAsync($"SET THE ADJUSTMENT TO {toText}", "SET THE OVEN'S THERMOSTAT ADJUSTMENT TO", [toText], done,
+            "[bold]Enter[/] it's set   [bold]F[/] stop here (carry on later with --resume)",
+            key => key switch { '\r' or '\n' or ' ' => true, 'F' or 'Q' => false, _ => (bool?)null }, ct) ?? false;
+
     /// <summary>At the end of a session: asks for the oven to be turned off, reminding until Enter.</summary>
     public async Task AskTurnOffAsync(string? done, CancellationToken ct) =>
         await WaitForKeyAsync("TURN THE OVEN OFF", "TURN THE OVEN", ["OFF"], done, "[bold]Enter[/] it's off",
