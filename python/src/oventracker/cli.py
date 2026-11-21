@@ -70,9 +70,9 @@ SHARED = [
 ]
 
 RUN = SHARED + [
-    Opt("--meter", "DRIVER", "str", "meter", f"Which kind of meter: u1253b (the default), 34401a (with a PT100), 121gw (EEVblog, Bluetooth LE), or simulated. [bold]{APP_NAME} meters[/] lists them and what each can see."),
+    Opt("--meter", "DRIVER", "str", "meter", f"Which kind of meter: u1253b (the default), 34401a (with a type K thermocouple), 121gw (EEVblog, Bluetooth LE), or simulated. [bold]{APP_NAME} meters[/] lists them and what each can see."),
     Opt("-r|--resource", "WHERE", "str", "resource", "Where the meter is, in the driver's terms: COM5 for the U1253B (found automatically if left out), GPIB0::22::INSTR or COM3 for the 34401A, ble:<address> for the 121GW. Remembered."),
-    Opt("--meter-option", "KEY=VALUE", "list", "meter_options", "A setting for the meter's driver, e.g. rtd=pt100-b or nplc=100 for the 34401A. Repeat it for more than one. Remembered for that meter."),
+    Opt("--meter-option", "KEY=VALUE", "list", "meter_options", "A setting for the meter's driver, e.g. cj=22C (the cold junction's temperature) or nplc=100 for the 34401A. Repeat it for more than one. Remembered for that meter."),
     Opt("-p|--port", "PORT", "str", "port", "The same as --resource: the name it had when there was only a serial meter.", hidden=True),
     Opt("--simulate", None, "flag", "simulate", "Use a simulated oven and meter instead of the real ones: the same as --meter simulated."),
     Opt("--speed", "X", "float", "speed", "With --simulate, how many times faster than real time to run.", "60"),

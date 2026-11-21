@@ -10,12 +10,14 @@ public sealed record MeterRequest(string? Resource, string? Preferred, double In
     IReadOnlyDictionary<string, string>? Options = null);
 
 /// <summary>A setting a driver takes through <c>--meter-option key=value</c>, for the help text.</summary>
-/// <param name="Values">The values it takes, for people, e.g. "pt100, pt100-b".</param>
+/// <param name="Values">The values it takes, for people, e.g. "0.02, 0.2, 1, 10, 100".</param>
 public sealed record MeterOption(string Key, string Values, string Description);
 
 /// <summary>The outcome of asking one place for a meter.</summary>
 /// <param name="Meter">The connected meter, when the caller asked to keep it open.</param>
-public sealed record ProbeResult(string Resource, MeterIdentity? Identity, string? Error, ITemperatureMeter? Meter = null);
+/// <param name="Notes">Anything worth telling people on connecting, e.g. a setting that was assumed. Plain text.</param>
+public sealed record ProbeResult(string Resource, MeterIdentity? Identity, string? Error, ITemperatureMeter? Meter = null,
+    IReadOnlyList<string>? Notes = null);
 
 /// <summary>Something a driver can see, for the <c>meters</c> command.</summary>
 /// <param name="Note">Anything worth knowing about it, e.g. "outgoing Bluetooth".</param>
@@ -89,7 +91,7 @@ public static class MeterDrivers
 
     public static string Names => string.Join(", ", All.Select(d => d.Name));
 
-    /// <summary>Reads --meter-option values ("rtd=pt100-b", or several separated by commas). Null if one isn't key=value.</summary>
+    /// <summary>Reads --meter-option values ("cj=22C", or several separated by commas). Null if one isn't key=value.</summary>
     public static IReadOnlyDictionary<string, string>? ParseOptions(IEnumerable<string>? given)
     {
         var options = new Dictionary<string, string>(StringComparer.Ordinal);

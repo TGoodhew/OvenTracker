@@ -160,3 +160,39 @@ def test_the_console_report_is_the_c_sharp_apps(csharp, tmp_path, run):
         return lines[: next(i for i, line in enumerate(lines) if line.startswith("Wrote "))]
 
     assert before_wrote(p.stdout) == before_wrote(c.stdout)
+
+
+@pytest.mark.parametrize("meter_options", [{"cj": "22.5 °C", "nplc": "100"}, {}])
+def test_analyze_writes_the_meter_options_as_the_c_sharp_app_does(csharp, tmp_path, meter_options):
+    """session.json's meterOptions (the 34401A's cold junction) goes through analyze into results.json as it does in
+    the C# app: the session's last property, written the same way, or left out with none."""
+    run = tmp_path / "run"
+    run.mkdir()
+    source = REPO / "testdata" / "runs" / "sim-bake-convection-f"
+    shutil.copy(source / "readings.csv", run / "readings.csv")
+    session = json.loads((source / "session.json").read_text(encoding="utf-8-sig"))
+    session["meterOptions"] = meter_options
+    (run / "session.json").write_text(json.dumps(session, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    py_out, cs_out = tmp_path / "python", tmp_path / "csharp"
+    p = python_app("analyze", str(run), "--out", str(py_out))
+    assert p.returncode == 0, p.stdout + p.stderr
+    c = csharp_app(csharp, "analyze", str(run), "--out", str(cs_out))
+    assert c.returncode == 0, c.stdout + c.stderr
+    assert not load_compare().compare_dirs(str(cs_out), str(py_out))
+
+    def tail(folder: Path) -> str:
+        """The session's text from its last property before meterOptions to the end of the session."""
+        text = (folder / "results-reanalysed.json").read_text(encoding="utf-8")
+        end = text.index('"results": [')
+        start = text.rindex('"characterise"' if '"characterise"' in text[:end] else '"oven"', 0, end)
+        return text[start:end]
+
+    assert tail(py_out) == tail(cs_out)
+    py_session = json.loads((py_out / "results-reanalysed.json").read_text(encoding="utf-8"))["session"]
+    cs_session = json.loads((cs_out / "results-reanalysed.json").read_text(encoding="utf-8"))["session"]
+    assert list(py_session) == list(cs_session)
+    assert list(py_session)[-1] == "meterOptions"
+    assert py_session["meterOptions"] == cs_session["meterOptions"] == meter_options
+    if meter_options:
+        assert '"cj": "22.5 \\u00B0C"' in tail(cs_out)

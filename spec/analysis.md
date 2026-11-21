@@ -515,9 +515,6 @@ The sensors the app knows:
 | `--probe type-k` | 2.2 | 0.0075 | false | — |
 | `--probe type-k-special` (`type K thermocouple (special limits)`) | 1.1 | 0.004 | false | — |
 | `--probe 80bk-a` (`Fluke 80BK-A type K probe`) | 2.2 | 0.02 | false | 260 |
-| PT*n* RTD, class AA | 0.1 | 0.0017 | true | — |
-| PT*n* RTD, class A | 0.15 | 0.002 | true | — |
-| PT*n* RTD, class B | 0.3 | 0.005 | true | — |
 
 **Resolving the sensor**, when any of `--probe`, `--probe-tolerance` or `--probe-max` is given: start from the
 named probe's sensor, or else the session's. A `--probe-tolerance` such as `2.2C,2%` (the greater of the two) or

@@ -14,7 +14,7 @@ namespace OvenTracker.Commands;
 public class RunSettings : SharedSettings
 {
     [CommandOption("--meter <DRIVER>")]
-    [Description("Which kind of meter: u1253b (the default), 34401a (with a PT100), 121gw (EEVblog, Bluetooth LE), or simulated. [bold]oventracker meters[/] lists them and what each can see.")]
+    [Description("Which kind of meter: u1253b (the default), 34401a (with a type K thermocouple), 121gw (EEVblog, Bluetooth LE), or simulated. [bold]oventracker meters[/] lists them and what each can see.")]
     public string? Meter { get; set; }
 
     [CommandOption("-r|--resource <WHERE>")]
@@ -22,7 +22,7 @@ public class RunSettings : SharedSettings
     public string? Resource { get; set; }
 
     [CommandOption("--meter-option <KEY=VALUE>")]
-    [Description("A setting for the meter's driver, e.g. rtd=pt100-b or nplc=100 for the 34401A. Repeat it for more than one. Remembered for that meter.")]
+    [Description("A setting for the meter's driver, e.g. cj=22C (the cold junction's temperature) or nplc=100 for the 34401A. Repeat it for more than one. Remembered for that meter.")]
     public string[]? MeterOptions { get; set; }
 
     [CommandOption("-p|--port <PORT>", IsHidden = true)]
@@ -116,7 +116,7 @@ public class RunSettings : SharedSettings
         if (Simulate && Meter is not null && MeterDrivers.Find(Meter)?.IsSimulation != true) return ValidationResult.Error("--simulate can't be used with another --meter.");
         if ((Resource ?? Port) is { } where && ResourceSpec.Parse(where) is null)
             return ValidationResult.Error($"--resource \"{where}\" isn't one the app understands. Examples: COM5, COM5:9600,E,7,2 (with serial settings), /dev/ttyUSB0, GPIB0::22::INSTR, ble:C4:BE:84:12:34:56.");
-        if (MeterDrivers.ParseOptions(MeterOptions) is null) return ValidationResult.Error("--meter-option takes key=value, e.g. --meter-option rtd=pt100-b.");
+        if (MeterDrivers.ParseOptions(MeterOptions) is null) return ValidationResult.Error("--meter-option takes key=value, e.g. --meter-option cj=22C.");
         if (Port is not null && Resource is not null && !string.Equals(Port, Resource, StringComparison.OrdinalIgnoreCase))
             return ValidationResult.Error("Give the meter's location once, with --resource.");
         if (Unit is not null && Temp.ParseUnit(Unit) is null) return ValidationResult.Error("--unit must be F or C.");
@@ -179,21 +179,33 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
         var ct = cancellationToken;
         var appSettings = AppSettings.Load();
         // The oven: the one asked for, the saved run's, the one used last time, or the generic one.
-        var resumedOven = s.Resume is { } r0 ? AnalyzeCommand.Load(r0)?.Info.Oven : null;
+        var resumedRun = s.Resume is { } r0 ? AnalyzeCommand.Load(r0) : null;
+        var resumedOven = resumedRun?.Info.Oven;
         var ovenProfile = OvenProfiles.Find(s.Oven) ?? resumedOven ?? OvenProfiles.Find(appSettings.LastOven) ?? OvenProfiles.Default;
         var driver = ChooseDriver(s, appSettings);
         var resource = s.Resource ?? s.Port;
-        // The driver's own settings: those given, or the ones used with it last time.
+        // The driver's own settings: those given; when resuming, the run's own (a cold junction, say, shouldn't change
+        // between sittings unless asked); otherwise the ones used with this meter last time.
         var givenOptions = MeterDrivers.ParseOptions(s.MeterOptions)!;
-        var meterOptions = givenOptions.Count > 0 ? givenOptions : appSettings.MeterOptionsFor(driver.Name);
+        var meterOptions = givenOptions.Count > 0 ? givenOptions
+            : resumedRun?.Info.MeterOptions is { Count: > 0 } runOptions ? runOptions
+            : appSettings.MeterOptionsFor(driver.Name);
+        string? forgotten = null;
         if (driver.CheckOptions(meterOptions) is { } badOption)
         {
-            AnsiConsole.MarkupLine($"[red]{Markup.Escape(badOption)}[/]");
-            return 1;
+            if (givenOptions.Count > 0)
+            {
+                AnsiConsole.MarkupLine($"[red]{Markup.Escape(badOption)}[/]");
+                return 1;
+            }
+            // Remembered from an earlier version of the driver (the 34401A's rtd=, say): not worth stopping a run over.
+            forgotten = $"The settings remembered for this meter no longer apply, so they're forgotten: {badOption}";
+            meterOptions = new Dictionary<string, string>();
         }
         AnsiConsole.Write(new FigletText("OvenTracker").Color(Color.Orange1));
         AnsiConsole.MarkupLine($"[grey]v{Version} · oven temperature accuracy · {Markup.Escape(driver.Description)}[/]");
         AnsiConsole.WriteLine();
+        if (forgotten is not null) AnsiConsole.MarkupLine($"[yellow]{Markup.Escape(forgotten)}[/]");
 
         // 1. The meter.
         ProbeResult? found = null;
@@ -225,6 +237,7 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
             appSettings.RememberMeterOptions(driver.Name, meterOptions);
             appSettings.Save();
             AnsiConsole.MarkupLine($"[green]Connected[/] to {Markup.Escape(identity.ToString())} on {Markup.Escape(found.Resource)}.");
+            foreach (var note in found.Notes ?? []) AnsiConsole.MarkupLine($"[yellow]{Markup.Escape(note)}[/]");
 
             config = meter.ReadConfig();
             if (config is { IsTemperature: false })
@@ -412,6 +425,7 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
             outDir = resumed.Folder;
             info = resumed.Info with
             {
+                MeterOptions = meterOptions.Count > 0 ? new Dictionary<string, string>(meterOptions) : resumed.Info.MeterOptions,
                 AdjustmentC = adjustmentC,
                 Adjust = s.BuildOptions(unit, resumed.Info.Adjust, ovenProfile),
                 Oven = ovenProfile,
@@ -425,7 +439,8 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
             outDir = s.Out ?? Path.Combine(RunsFolder(), DateTime.Now.ToString("yyyy-MM-dd HHmm", Inv));
             info = new SessionInfo(Version, startedAt, $"{identity.Manufacturer} {identity.Model}", meter.Location, unit, toleranceC, options, plan,
                 driver.Name, identity, sensor, characterising ? adjustmentC ?? 0 : adjustmentC, s.BuildOptions(unit, null, ovenProfile), ambientC, [startedAt], ovenProfile,
-                s is CharacteriseSettings cs ? new CharacteriseInfo(f.DeltaFromDisplay(cs.Step), adjustmentC ?? 0) : null);
+                s is CharacteriseSettings cs ? new CharacteriseInfo(f.DeltaFromDisplay(cs.Step), adjustmentC ?? 0) : null,
+                meterOptions.Count > 0 ? new Dictionary<string, string>(meterOptions) : null);
         }
         if (!driver.IsSimulation)
         {
@@ -436,7 +451,13 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
         // A simulation's readings carry its own, faster clock: its events take the time of the latest reading, so
         // readings.csv stays in time order within a sitting. (A resumed simulation's clock starts again from the PC's.)
         if (driver.IsSimulation) recorder.Clock = () => recorder.LastReadingTime ?? DateTimeOffset.UtcNow;
-        if (resumed is not null) recorder.Note(recorder.Now, "resume");
+        if (resumed is not null)
+        {
+            recorder.Note(recorder.Now, "resume");
+            // What this sitting used, in the readings: session.json has room for one set, and a resumed run may have been given others.
+            if (meterOptions.Count > 0)
+                recorder.Note(recorder.Now, "meter-options:" + string.Join(";", meterOptions.OrderBy(kv => kv.Key, StringComparer.Ordinal).Select(kv => $"{kv.Key}={kv.Value}")));
+        }
         using var poller = new MeterPoller(meter, TimeSpan.FromSeconds(s.Interval), driver.IsSimulation ? s.Speed : 1, connected: true);
         poller.Start();
 

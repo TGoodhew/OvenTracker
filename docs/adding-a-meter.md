@@ -1,7 +1,7 @@
 # Adding a meter
 
 OvenTracker reads its temperatures through a **driver**, one for each kind of meter. Four come with the
-app: the Keysight U1253B (`u1253b`), the HP 34401A with a PT100 (`34401a`), the EEVblog 121GW over Bluetooth
+app: the Keysight U1253B (`u1253b`), the HP 34401A with a type K thermocouple (`34401a`), the EEVblog 121GW over Bluetooth
 LE (`121gw`) and the simulator (`simulated`). This page explains how to add another,
 for example a bench DMM with a thermocouple input, or a USB thermocouple logger.
 
@@ -197,8 +197,10 @@ per driver.
    if it returns one. Keys arrive in lower case.
 3. Read them from `MeterRequest.Options` in `Open`.
 
-The app remembers each driver's options with its resource. The 34401A's `rtd` (PT100 class) and `nplc`
-(integration time) are the example.
+The app remembers each driver's options with its resource. The 34401A's `cj` (the thermocouple's cold junction) and `nplc`
+(integration time) are the example. The run records the options it used in `session.json` (`meterOptions`), so a
+result says what its settings were. A driver that assumed a setting can say so on connecting through
+`ProbeResult.Notes`: the 34401A does when no cold junction was given.
 
 ## Registering the driver
 

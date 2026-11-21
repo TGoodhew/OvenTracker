@@ -6,6 +6,11 @@ port doesn't cover it, or a `parity` issue is open), or **Python**.
 
 ## Unreleased
 
+- The 34401A reads a type K thermocouple instead of a PT100: DC millivolts with cold-junction compensation
+  (`--meter-option cj=22C`, 23 °C assumed when left off). The probe is a generic type K, and `--probe` picks a
+  specific one. The run records its meter options in `session.json` (`meterOptions`). Has: **C#** (the Python
+  app's 34401A is #38).
+
 - Display fixes (#41). Has: **both**.
   - The big "set the adjustment" prompt keeps its minus sign: it showed "10 F" for −10 °F.
   - The dashboard fits the window: it's measured, not estimated, and a small window gets a compact layout.

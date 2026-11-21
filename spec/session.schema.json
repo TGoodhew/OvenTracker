@@ -44,7 +44,12 @@
         "ambientC": { "type": "number", "description": "Room temperature (°C)." },
         "sittings": { "type": "array", "items": { "$ref": "#/$defs/timestamp" }, "description": "When each sitting started: the first, then each resume." },
         "oven": { "$ref": "#/$defs/ovenProfile" },
-        "characterise": { "$ref": "#/$defs/characteriseInfo" }
+        "characterise": { "$ref": "#/$defs/characteriseInfo" },
+        "meterOptions": {
+          "description": "The driver's --meter-option settings the run used, e.g. the 34401A's cold junction (cj). Left out when there were none.",
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
       }
     },
     "testPoint": {

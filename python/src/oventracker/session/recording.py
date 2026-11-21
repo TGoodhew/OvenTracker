@@ -63,6 +63,8 @@ class SessionInfo:
     sittings: list[DateTimeOffset] | None = None
     oven: OvenProfile | None = None
     characterise: CharacteriseInfo | None = None
+    #: The driver's --meter-option settings the run used (the 34401A's cold junction, say), when any.
+    meter_options: dict[str, str] | None = None
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -83,6 +85,7 @@ class SessionInfo:
             "sittings": self.sittings,
             "oven": self.oven,
             "characterise": self.characterise,
+            "meterOptions": self.meter_options,
         }
 
     @staticmethod
@@ -107,7 +110,17 @@ class SessionInfo:
             sittings=None if sittings is None else [DateTimeOffset.parse(s) for s in sittings],
             oven=OvenProfile.from_json(d.get("oven")),
             characterise=CharacteriseInfo.from_json(d.get("characterise")),
+            meter_options=_string_map(d.get("meterOptions")),
         )
+
+
+def _string_map(value: Any) -> dict[str, str] | None:
+    """A JSON object of strings (IReadOnlyDictionary<string, string>), in its order. Anything else isn't one."""
+    if value is None:
+        return None
+    if not isinstance(value, dict) or not all(isinstance(v, str) for v in value.values()):
+        raise ValueError(f"meterOptions must be an object of strings: {value!r}")
+    return dict(value)
 
 
 def results_json(info: SessionInfo, results: list[PointResult]) -> str:

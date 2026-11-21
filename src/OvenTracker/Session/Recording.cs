@@ -17,6 +17,7 @@ namespace OvenTracker.Session;
 /// <param name="Sittings">When each sitting started: the first, then each resume.</param>
 /// <param name="Oven">The oven's profile, as it was for this run.</param>
 /// <param name="Characterise">For a characterise run: its step, and the adjustment phase 2 moved to.</param>
+/// <param name="MeterOptions">The driver's --meter-option settings the run used (the 34401A's cold junction, say), when any.</param>
 public sealed record SessionInfo(
     string AppVersion,
     DateTimeOffset Started,
@@ -34,7 +35,8 @@ public sealed record SessionInfo(
     double? AmbientC = null,
     IReadOnlyList<DateTimeOffset>? Sittings = null,
     Ovens.OvenProfile? Oven = null,
-    CharacteriseInfo? Characterise = null);
+    CharacteriseInfo? Characterise = null,
+    IReadOnlyDictionary<string, string>? MeterOptions = null);
 
 public static class Json
 {

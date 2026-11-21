@@ -269,7 +269,7 @@ Each kind of meter has a driver in `src/OvenTracker/Meter`. Four come with the a
 | `--meter` | What it is | `--resource` |
 | --- | --- | --- |
 | `u1253b` (the default) | A Keysight U1253B (or another U1250-series meter) through a U1177A Bluetooth adapter or a U1173 cable | A serial port: `COM5` on Windows, `/dev/rfcomm0` on Linux (9600 8N1, or give settings: `COM5:9600,N,8,1`). Left out, the app tries the port that worked last time, then each Bluetooth link. |
-| `34401a` | An HP / Agilent / Keysight 34401A bench DMM reading a PT100 RTD by 4-wire resistance (see below) | `GPIB0::22::INSTR` (or `gpib:22`) through VISA, or a serial port for its RS-232 port: `COM3`, `/dev/ttyUSB0` (9600, even parity, 7 data bits, 2 stop bits from the factory, or give settings: `COM3:9600,N,8,2`). Required the first time, then remembered. |
+| `34401a` | An HP / Agilent / Keysight 34401A bench DMM reading a type K thermocouple as DC millivolts (see below) | `GPIB0::22::INSTR` (or `gpib:22`) through VISA, or a serial port for its RS-232 port: `COM3`, `/dev/ttyUSB0` (9600, even parity, 7 data bits, 2 stop bits from the factory, or give settings: `COM3:9600,N,8,2`). Required the first time, then remembered. |
 | `121gw` | An EEVblog 121GW with a type K thermocouple, over Bluetooth LE (Windows and Linux) | `ble:C4:BE:84:12:34:56` or `ble:121GW`. Left out, the app tries the one that answered last time, then each 121GW the system knows (on Linux it scans if there's none). |
 | `simulated` | A made-up oven and meter. `--simulate` is short for `--meter simulated`. | Not used. |
 
@@ -291,24 +291,32 @@ newer ones USB and LAN. `--resource` says both where and how, by its form:
 Each driver says which it accepts (`OvenTracker run --help`, and its row above). The app remembers the resource,
 settings and all, for next time.
 
-### The 34401A with a PT100
+### The 34401A with a type K thermocouple
 
-The 34401A has no temperature function, so the app measures a platinum RTD's resistance with 4-wire ohms and
-converts it with the IEC 60751 (Callendar–Van Dusen) equation. A PT100 is more accurate than a thermocouple:
-class A is ±(0.15 °C + 0.2 % of the temperature), about ±0.6 °C at 230 °C, against ±2.2 °C for a standard type
-K. It also needs no cold-junction compensation. For a 4-wire PT100, connect one pair of its leads to
-HI and LO Input and the other pair to HI and LO Sense (Ω 4W). Use a probe whose cable is rated for the oven's
-temperature (PTFE or glass-fibre insulation), and give its limit with `--probe-max`, e.g. `--probe-max 260C`.
+The 34401A has no temperature function, so the app reads a type K thermocouple's voltage on the 100 mV DC range,
+with the input at its high impedance (over 10 GΩ, so the thermocouple isn't loaded). It converts the voltage
+with the NIST ITS-90 type K reference function. The probe is a generic type K, as for the U1253B: `--probe`
+says which one (`--probe 80bk-a` for a Fluke 80BK-A), and its tolerance goes in the report. Plug the probe into
+HI and LO Input with a type K to banana adapter, positive (yellow, chromel) to HI.
+
+A thermocouple measures only the difference between its tip and its **cold junction**: where it meets the
+copper of the meter's terminals, normally at room temperature. A meter with a thermocouple input measures that
+junction itself; the 34401A can't, so give the room's temperature:
 
 ```powershell
-OvenTracker.exe run --meter 34401a --resource GPIB0::22::INSTR            # a class A PT100, the default
-OvenTracker.exe run --meter 34401a --resource COM3 --meter-option rtd=pt100-b
+OvenTracker.exe run --meter 34401a --resource GPIB0::22::INSTR --meter-option cj=22C --probe 80bk-a
+OvenTracker.exe run --meter 34401a --resource COM3 --meter-option cj=72F
 ```
 
-- **The RTD:** `--meter-option rtd=` takes `pt100`, `pt100-a`, `pt100-b`, `pt100-aa` or `pt1000` (class A when
-  left off). Its class is the probe tolerance in the report.
-- **Integration time:** `--meter-option nplc=` takes 0.02, 0.2, 1, 10 (the default, about half a second a
-  reading) or 100 (quieter, about 4 s a reading).
+- **The cold junction:** `--meter-option cj=` takes a temperature with its unit, e.g. `22C` or `72F`. Every
+  reading is off by as much as this is: a room 5 °C warmer than given reads 5 °C low. Without it the app assumes
+  23 °C and says so when it connects. Measure the air next to the meter's terminals, and keep the adapter out of
+  draughts and away from the oven. For the best accuracy, put the probe's cold end in iced water through a copper
+  extension lead, and give `cj=0C`.
+- **Integration time:** `--meter-option nplc=` takes 0.02, 0.2, 1, 10 (the default, about a third of a second
+  a reading) or 100 (quieter, about 3 s a reading).
+- **Recorded:** the run's `session.json` records the options it used (`meterOptions`), so a result says which
+  cold junction it assumed.
 - **Remembered:** the app remembers the address and the options, so after the first run `--meter 34401a` is
   enough.
 - **GPIB** needs VISA: NI-VISA (with NI-488.2 for an NI adapter) or Keysight IO Libraries Suite, 64-bit. The app
@@ -390,8 +398,9 @@ the last, so a slow stream never gives the same reading twice.
 
 On GPIB, commands end in LF and replies end with EOI. On RS-232 the app first sends `SYST:REM`, as the manual
 asks (User's Guide, p. 160). It then checks that `*IDN?` names a 34401A before changing anything. It sends
-`*RST`, `*CLS`, `CONF:FRES 1E+3` (the 1 kΩ range for a PT100, 10 kΩ for a PT1000), `FRES:NPLC 10` and
-`ZERO:AUTO ON`, and checks `SYST:ERR?`. Then it polls with `READ?`. +9.9E+37 means an open RTD. It re-checks
+`*RST`, `*CLS`, `CONF:VOLT:DC 0.1` (the 100 mV range), `VOLT:DC:NPLC 10`, `INP:IMP:AUTO ON` (over 10 GΩ) and
+`ZERO:AUTO ON`, and checks `SYST:ERR?`. Then it polls with `READ?`, in volts. +9.9E+37 is an overload, as an
+open thermocouple's floating input usually gives; a voltage beyond type K's range is an error. It re-checks
 `CONF?` every 30 readings, in case someone pressed Local and changed the function. At the end it gives the
 front panel back.
 

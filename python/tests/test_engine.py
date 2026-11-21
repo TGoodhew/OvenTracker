@@ -116,9 +116,29 @@ def test_a_resumed_run_waits_for_a_hot_oven_and_finishes_the_rest(tmp_path: Path
 
 
 def test_a_meter_the_python_version_doesnt_have_yet_says_so():
-    p = run_app("run", "--meter", "34401a", "-y", "--unit", "F", "--modes", "bake", "--setpoints", "350")
+    p = run_app("run", "--meter", "121gw", "-y", "--unit", "F", "--modes", "bake", "--setpoints", "350")
     assert p.returncode == 1
     assert "isn't in the Python version yet" in p.stdout
+
+
+def test_a_34401a_that_isnt_there_is_a_message_not_a_traceback(tmp_path: Path):
+    # A settings folder of its own, so a 34401A remembered on this PC is never sent anything.
+    env = {"APPDATA": str(tmp_path), "XDG_CONFIG_HOME": str(tmp_path)}
+    port = "COM99" if sys.platform == "win32" else "/dev/ttyNOPE99"
+    p = run_app("run", "--meter", "34401a", "--resource", port, "-y", "--unit", "F", extra_env=env)
+    assert p.returncode == 1, p.stdout + p.stderr
+    assert f"No meter answered on {port}: Could not open {port}" in p.stdout
+    assert "Traceback" not in p.stdout + p.stderr
+    # GPIB without PyVISA says what to install (PyVISA is hidden, so no instrument is ever asked).
+    hide = tmp_path / "no-pyvisa"
+    hide.mkdir()
+    (hide / "pyvisa.py").write_text('raise ImportError("hidden by the test")\n', encoding="utf-8")
+    env["PYTHONPATH"] = os.pathsep.join([str(hide), str(SRC)])
+    p = run_app("run", "--meter", "34401a", "--resource", "GPIB0::22::INSTR", "-y", "--unit", "F", extra_env=env)
+    assert p.returncode == 1, p.stdout + p.stderr
+    assert "No meter answered on GPIB0::22::INSTR: VISA isn't installed" in p.stdout
+    assert "pip install pyvisa" in p.stdout
+    assert "Traceback" not in p.stdout + p.stderr
 
 
 @pytest.mark.parametrize(
