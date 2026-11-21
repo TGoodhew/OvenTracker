@@ -1,6 +1,4 @@
-# minimax, favouring 200 C
+# favouring 200 C
 runs/sim-bake-c
---objective
-minimax
 --favour
 200

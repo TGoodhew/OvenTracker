@@ -4,7 +4,7 @@ Run 2026-11-20 17:13 with OvenTracker simulated meter on simulator. A setpoint i
 
 ## Findings
 
-- Bake: runs 7.8 °F hot on average over 1 setpoint (worst 7.8 °F). The thermostat swings 33.8 °F peak to peak, one cycle every 2.9 min.
+- Bake: runs 7.9 °F hot on average over 1 setpoint (worst 7.9 °F). The thermostat swings 33.8 °F peak to peak, one cycle every 2.9 min.
 - Convection: runs 8.3 °F cold on average over 1 setpoint (worst 8.3 °F). The thermostat swings 17.1 °F peak to peak, one cycle every 2.3 min.
 - Bake and convection (one adjustment for both): leave the thermostat adjustment as it is; no step would make the oven more accurate. Details are under Best adjustment.
 - At 350 °F, convection is 16.2 °F cooler than bake.
@@ -13,11 +13,10 @@ Run 2026-11-20 17:13 with OvenTracker simulated meter on simulator. A setpoint i
 
 | Mode | Set | Measured | Offset | ±95 % | Verdict | Swing | Range | Cycle | To temp | First peak | Time | Used |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Bake | 350 °F | 357.9 °F | +7.8 °F | 0.4 °F | Accurate | 33.8 °F | 341–375 | 2.9 min | 21 min | +15.2 °F | 51 min | 4 cycles |
+| Bake | 350 °F | 357.9 °F | +7.9 °F | 0.4 °F | Accurate | 33.8 °F | 341–375 | 2.9 min | 21 min | +15.2 °F | 51 min | 4 cycles |
 | Convection | 350 °F | 341.7 °F | −8.3 °F | 0.1 °F | Accurate | 17.1 °F | 333–350 | 2.3 min | 1 min | — | 13 min | 4 cycles |
 
 *Measured* is the time-weighted mean over whole thermostat cycles once the oven had settled; *±95 %* is how sure that mean is. *Swing* is the average peak-to-peak of a cycle and *Range* the lowest and highest readings while measuring. *To temp* is from pressing Start to first reaching the setting (or the thermostat first turning round, for an oven that runs cold); *First peak* is the first high point against the setting, which is the overshoot when it is positive.
-
 
 ## Best adjustment
 
@@ -30,7 +29,7 @@ Run 2026-11-20 17:13 with OvenTracker simulated meter on simulator. A setpoint i
 
 | Mode | Set | Now | After adjusting | ±95 % | Within tolerance? |
 | --- | --- | --- | --- | --- | --- |
-| Bake | 350 °F | +7.8 °F | +7.8 °F | 0.4 °F | Yes |
+| Bake | 350 °F | +7.9 °F | +7.9 °F | 0.4 °F | Yes |
 | Convection | 350 °F | −8.3 °F | −8.3 °F | 0.1 °F | Yes |
 
 What to set after adjusting, where the adjustment alone leaves the oven 5 °F (3 °C) or more out:

@@ -65,7 +65,7 @@ public sealed class ChangePrompt(MeterPoller poller, RunRecorder recorder, UnitF
         var started = DateTimeOffset.UtcNow;
         var reminded = 0;
         T? choice = null;
-        recorder.Note(started, $"prompt:{note}");
+        recorder.Note(recorder.Now, $"prompt:{note}");
 
         IRenderable Render()
         {
@@ -103,7 +103,7 @@ public sealed class ChangePrompt(MeterPoller poller, RunRecorder recorder, UnitF
                 }
                 try { await Task.Delay(250, ct); } catch (OperationCanceledException) { }
             }
-            recorder.Note(DateTimeOffset.UtcNow, $"answered:{choice}:{(DateTimeOffset.UtcNow - started).TotalSeconds.ToString("F0", Inv)}s");
+            recorder.Note(recorder.Now, $"answered:{choice}:{(DateTimeOffset.UtcNow - started).TotalSeconds.ToString("F0", Inv)}s");
             return choice;
         }
 
@@ -128,7 +128,7 @@ public sealed class ChangePrompt(MeterPoller poller, RunRecorder recorder, UnitF
             }
             ctx.UpdateTarget(Render());
         });
-        recorder.Note(DateTimeOffset.UtcNow, $"answered:{choice}:{(DateTimeOffset.UtcNow - started).TotalSeconds.ToString("F0", Inv)}s");
+        recorder.Note(recorder.Now, $"answered:{choice}:{(DateTimeOffset.UtcNow - started).TotalSeconds.ToString("F0", Inv)}s");
         return choice;
     }
 

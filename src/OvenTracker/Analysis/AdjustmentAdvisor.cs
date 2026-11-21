@@ -123,8 +123,14 @@ public static class AdjustmentAdvisor
     /// <summary>Setpoints closer together than this (50 °F) can't show how the error changes with temperature.</summary>
     public const double ShapeSpanC = 50 / 1.8;
 
-    /// <summary>Setpoints within this of each other count as the same (runs in °F store 176.667 and 176.67).</summary>
+    /// <summary>Setpoints in the same 0.05 °C step count as the same (runs in °F store 176.667 and 176.67).</summary>
     const double SameSetpointC = 0.05;
+
+    /// <summary>
+    /// Which setpoints are "the same": everything that groups setpoints (repeats here, and bake against
+    /// convection in <see cref="SessionSummary"/>) uses this key.
+    /// </summary>
+    public static double SetpointKey(double setpointC) => Math.Round(setpointC / SameSetpointC);
 
     /// <param name="currentC">The oven's adjustment now (the latest run's), if known.</param>
     public static IReadOnlyList<AdjustmentAdvice> Advise(IReadOnlyList<AdjustPoint> points, AdjustmentOptions options, double? currentC)
@@ -147,14 +153,16 @@ public static class AdjustmentAdvisor
         // Every setpoint's error as it would be at the reference adjustment, repeats averaged.
         var now = points
             .Select(p => p with { OffsetC = p.OffsetC + G(p.Mode) * (reference - p.AdjustmentC), AdjustmentC = reference })
-            .GroupBy(p => (p.Mode, Key: Math.Round(p.SetpointC / SameSetpointC)))
+            .GroupBy(p => (p.Mode, Key: SetpointKey(p.SetpointC)))
             .Select(g => new AdjustPoint(g.Key.Mode, g.Average(p => p.SetpointC), g.Average(p => p.OffsetC),
                 g.All(p => p.HalfWidthC is not null) ? Math.Sqrt(g.Sum(p => p.HalfWidthC!.Value * p.HalfWidthC.Value)) / g.Count() : null, reference))
             .OrderBy(p => p.Mode).ThenBy(p => p.SetpointC)
             .ToList();
 
-        var lo = -options.RangeC - (currentC ?? 0);
-        var hi = options.RangeC - (currentC ?? 0);
+        // The changes that keep the setting within its range. Without the current setting, only the changes possible
+        // from any setting in the range are certain: up to twice the range either way.
+        var lo = currentC is { } now0 ? -options.RangeC - now0 : -2 * options.RangeC;
+        var hi = currentC is { } now1 ? options.RangeC - now1 : 2 * options.RangeC;
         var (change, clamped) = Best(now, options, G, lo, hi);
 
         var residuals = now.Select(p => new Residual(p.Mode, p.SetpointC, p.OffsetC, p.OffsetC + G(p.Mode) * change, p.HalfWidthC)).ToList();
@@ -179,7 +187,8 @@ public static class AdjustmentAdvisor
         foreach (var modeGroup in points.GroupBy(p => p.Mode))
         {
             double num = 0, den = 0, variance = 0;
-            foreach (var g in modeGroup.GroupBy(p => Math.Round(p.SetpointC / SameSetpointC)))
+            var everyHalfWidth = true; // a point without one leaves the gain's uncertainty unknown
+            foreach (var g in modeGroup.GroupBy(p => SetpointKey(p.SetpointC)))
             {
                 var list = g.ToList();
                 for (var i = 0; i < list.Count; i++)
@@ -189,13 +198,13 @@ public static class AdjustmentAdvisor
                         if (Math.Abs(dk) < 2 * options.StepC - 1e-9) continue; // too small a change to measure anything
                         num += (list[j].OffsetC - list[i].OffsetC) * dk;
                         den += dk * dk;
-                        var pairHw = Math.Pow(list[i].HalfWidthC ?? 1, 2) + Math.Pow(list[j].HalfWidthC ?? 1, 2);
-                        variance += pairHw * dk * dk;
+                        if (list[i].HalfWidthC is { } hi && list[j].HalfWidthC is { } hj) variance += (hi * hi + hj * hj) * dk * dk;
+                        else everyHalfWidth = false;
                     }
             }
             if (den > 0)
             {
-                result[modeGroup.Key] = new ModeGain(num / den, GainSource.Measured, Math.Sqrt(variance) / den);
+                result[modeGroup.Key] = new ModeGain(num / den, GainSource.Measured, everyHalfWidth ? Math.Sqrt(variance) / den : null);
                 continue;
             }
             if (options.KnownGains is { } known && known.TryGetValue(modeGroup.Key, out var k))
@@ -226,8 +235,16 @@ public static class AdjustmentAdvisor
         var step = options.StepC;
         if (options.FavourC is { } favour)
         {
-            var g = now.Average(p => gain(p.Mode));
-            var wanted = Snap(-ErrorAt(now, favour) / g, step);
+            // Right at one temperature: the change that makes each mode's error there (from its own straight line)
+            // smallest, in least squares, each mode moving by its own gain. With one mode, simply −error / gain.
+            double sgE = 0, sgg = 0;
+            foreach (var m in now.GroupBy(p => p.Mode))
+            {
+                var g = gain(m.Key);
+                sgE += g * ErrorAt(m.ToList(), favour);
+                sgg += g * g;
+            }
+            var wanted = Snap(-sgE / sgg, step);
             var allowed = Math.Clamp(wanted, SnapUp(lo, step), SnapDown(hi, step));
             return (allowed, Math.Abs(allowed - wanted) > 1e-9);
         }
@@ -276,19 +293,21 @@ public static class AdjustmentAdvisor
     /// <summary>Setpoints to add when the ones measured can't show whether the error changes with temperature.</summary>
     static IReadOnlyList<double> AddSetpoints(IReadOnlyList<AdjustPoint> now, out string? why)
     {
-        why = null;
+        var reasons = new List<(OvenMode Mode, string Why)>();
         var add = new List<double>();
         foreach (var g in now.GroupBy(p => p.Mode))
         {
             var sps = g.Select(p => p.SetpointC).Distinct().Order().ToList();
             var span = sps[^1] - sps[0];
+            string reason;
             if (sps.Count == 1)
-                why = "With one setpoint per mode, the app can't tell an error that's the same at every setting from one that grows with temperature.";
+                reason = "With one setpoint per mode, the app can't tell an error that's the same at every setting from one that grows with temperature.";
             else if (span < ShapeSpanC)
-                why = "The setpoints are too close together to show how the error changes with temperature.";
+                reason = "The setpoints are too close together to show how the error changes with temperature.";
             else if (sps.Count == 2 && Math.Abs(g.Last().OffsetC - g.First().OffsetC) >= WorthC)
-                why = "The error changes between the two setpoints. A third, in between, would show whether it changes in a straight line.";
+                reason = "The error changes between the two setpoints. A third, in between, would show whether it changes in a straight line.";
             else continue;
+            reasons.Add((g.Key, reason));
 
             if (sps.Count == 2 && span >= ShapeSpanC) add.Add((sps[0] + sps[1]) / 2);
             else
@@ -297,6 +316,13 @@ public static class AdjustmentAdvisor
                 add.Add(sps[^1] + ShapeSpanC);
             }
         }
+        // One reason when every mode that needs setpoints needs them for the same reason; otherwise each mode's.
+        why = reasons.Select(r => r.Why).Distinct().Count() switch
+        {
+            0 => null,
+            1 => reasons[0].Why,
+            _ => string.Join(" ", reasons.Select(r => $"{r.Mode}: {r.Why}")),
+        };
         // Keep to ordinary baking temperatures (250–500 °F).
         return add.Select(c => Math.Clamp(c, 121, 260)).Distinct().Order().ToList();
     }

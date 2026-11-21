@@ -33,6 +33,7 @@ public sealed record Characterisation(
     AdjustmentAdvice? Recommendation)
 {
     static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
+    /// <summary>Adjustments in the same 0.05 °C step count as the same; setpoints use <see cref="AdjustmentAdvisor.SetpointKey"/>.</summary>
     const double SameC = 0.05;
 
     /// <summary>The gains worth keeping in the oven's profile: those measured.</summary>
@@ -63,7 +64,7 @@ public sealed record Characterisation(
         // Repeats: the same mode, setpoint and adjustment, more than once.
         var repeats = results
             .Where(r => r.Metrics.MeanC is not null)
-            .GroupBy(r => (r.Point.Mode, Sp: Math.Round(r.Point.SetpointC / SameC), Adj: Math.Round((r.Point.AdjustmentC ?? info.AdjustmentC ?? 0) / SameC)))
+            .GroupBy(r => (r.Point.Mode, Sp: AdjustmentAdvisor.SetpointKey(r.Point.SetpointC), Adj: Math.Round((r.Point.AdjustmentC ?? info.AdjustmentC ?? 0) / SameC)))
             .Where(g => g.Count() >= 2)
             .Select(g => new Repeat(g.Key.Mode, g.First().Point.SetpointC, g.First().Point.AdjustmentC ?? info.AdjustmentC ?? 0, g.Select(r => r.Metrics.MeanC!.Value).ToList()))
             .ToList();

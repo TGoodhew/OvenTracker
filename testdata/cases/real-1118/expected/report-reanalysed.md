@@ -15,7 +15,6 @@ Run 2026-11-20 11:18 with Agilent Technologies U1253B on COM5. A setpoint is acc
 
 *Measured* is the time-weighted mean over whole thermostat cycles once the oven had settled; *±95 %* is how sure that mean is. *Swing* is the average peak-to-peak of a cycle and *Range* the lowest and highest readings while measuring. *To temp* is from pressing Start to first reaching the setting (or the thermostat first turning round, for an oven that runs cold); *First peak* is the first high point against the setting, which is the overshoot when it is positive.
 
-
 ## Best adjustment
 
 **Bake: change the oven's thermostat adjustment by −17 °F, from whatever it is set to now.**

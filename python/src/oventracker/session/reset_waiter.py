@@ -183,7 +183,7 @@ class ResetWaiter:
         model = CoolingModel(self._ambient_c)
         cold = ResetTarget("Start again from cold", self._ambient_c + MARGIN)
         start: datetime | None = None
-        now = datetime.now(timezone.utc)
+        now = recorder.now  # then each reading's time
         ready = False
         outcome = ResetOutcome.Ready
         can_read_keys = ui.keys()

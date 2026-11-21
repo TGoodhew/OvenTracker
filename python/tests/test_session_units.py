@@ -519,7 +519,7 @@ def test_a_first_setpoint_started_warm_is_marked(tmp_path):
 
 
 def test_the_recording_is_in_the_specs_format(tmp_path):
-    """readings.csv as spec/recording.md describes it: the header, seven fractional digits, F3, F1 and F2."""
+    """readings.csv as spec/recording.md describes it: the header, seven fractional digits, and round-trip numbers."""
     plan = build_plan([OvenMode.Bake], [176.66666666666666])
     info = SessionInfo("test", now_offset(), "sim", "simulator", TempUnit.Fahrenheit, 15 / 1.8, OPTIONS, plan)
     t = datetime(2026, 11, 20, 19, 18, 8, 697716, tzinfo=timezone.utc)
@@ -531,7 +531,7 @@ def test_the_recording_is_in_the_specs_format(tmp_path):
     with open(os.path.join(tmp_path, "readings.csv"), encoding="utf-8", newline="") as fh:
         lines = fh.read().split(os.linesep)
     assert lines[0] == "time_utc,point,mode,setpoint_c,elapsed_s,status,temp_c,raw,event"
-    assert lines[1] == "2026-11-20T19:18:08.6977160Z,0,,,,Ok,180.87,+1.80873000E+02,"
-    assert lines[2] == "2026-11-20T19:18:08.6977160Z,1,Bake,176.667,0.0,Event,,,start"
-    assert lines[3] == "2026-11-20T19:18:08.6977160Z,1,Bake,176.667,14.2,Error,,TEMP:K CEL;x,"
+    assert lines[1] == "2026-11-20T19:18:08.6977160Z,0,,,,Ok,180.873,+1.80873000E+02,"
+    assert lines[2] == "2026-11-20T19:18:08.6977160Z,1,Bake,176.66666666666666,0,Event,,,start"
+    assert lines[3] == "2026-11-20T19:18:08.6977160Z,1,Bake,176.66666666666666,14.25,Error,,TEMP:K CEL;x,"
     assert lines[4] == "2026-11-20T19:18:08.6977160Z,0,,,,Event,,,prompt:SET THE OVEN TO BAKE 350 °F"

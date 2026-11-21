@@ -49,13 +49,19 @@ public sealed record ModeComparison(double SetpointC, PointMetrics Bake, PointMe
 
 public static class SessionSummary
 {
-    public static Verdict Judge(PointMetrics m, double toleranceC)
+    public static Verdict Judge(PointMetrics m, double toleranceC) =>
+        m.OffsetC is { } off ? Judge(off, m.HalfWidthC, toleranceC) : Verdict.Inconclusive;
+
+    /// <summary>
+    /// An error against the tolerance, given its ±95 % half-width. Without a half-width the uncertainty is
+    /// unknown, so an error within tolerance is only Borderline. The verdicts and the report's "Within tolerance?"
+    /// column both use this.
+    /// </summary>
+    public static Verdict Judge(double offsetC, double? halfWidthC, double toleranceC)
     {
-        if (m.OffsetC is not { } off) return Verdict.Inconclusive;
-        var hw = m.HalfWidthC ?? double.PositiveInfinity;
-        if (double.IsInfinity(hw)) return Math.Abs(off) <= toleranceC ? Verdict.Borderline : Verdict.OutOfTolerance;
-        if (Math.Abs(off) + hw <= toleranceC) return Verdict.Accurate;
-        if (Math.Abs(off) - hw > toleranceC) return Verdict.OutOfTolerance;
+        if (halfWidthC is not { } hw) return Math.Abs(offsetC) <= toleranceC ? Verdict.Borderline : Verdict.OutOfTolerance;
+        if (Math.Abs(offsetC) + hw <= toleranceC) return Verdict.Accurate;
+        if (Math.Abs(offsetC) - hw > toleranceC) return Verdict.OutOfTolerance;
         return Verdict.Borderline;
     }
 
@@ -88,7 +94,7 @@ public static class SessionSummary
     {
         var usable = Usable(results);
         var list = new List<ModeComparison>();
-        foreach (var g in usable.GroupBy(r => Math.Round(r.Point.SetpointC, 2)).OrderBy(g => g.Key))
+        foreach (var g in usable.GroupBy(r => AdjustmentAdvisor.SetpointKey(r.Point.SetpointC)).OrderBy(g => g.Key))
         {
             var bake = g.LastOrDefault(r => r.Point.Mode == OvenMode.Bake);
             var conv = g.LastOrDefault(r => r.Point.Mode == OvenMode.Convection);

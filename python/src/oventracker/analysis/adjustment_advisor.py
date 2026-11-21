@@ -195,6 +195,13 @@ SHAPE_SPAN_C = 50 / 1.8
 """Setpoints closer together than this (50 °F) can't show how the error changes with temperature."""
 
 _SAME_SETPOINT_C = 0.05
+"""Setpoints in the same 0.05 °C step count as the same (runs in °F store 176.667 and 176.67)."""
+
+
+def setpoint_key(setpoint_c: float) -> float:
+    """Which setpoints are "the same": everything that groups setpoints (repeats here, and bake against convection
+    in session_summary.compare) uses this key."""
+    return round_even(setpoint_c / _SAME_SETPOINT_C)
 
 
 def advise(points: list[AdjustPoint], options: AdjustmentOptions, current_c: float | None) -> list[AdjustmentAdvice]:
@@ -223,7 +230,7 @@ def _advise_group(
         replace(p, offset_c=p.offset_c + G(p.mode) * (reference - p.adjustment_c), adjustment_c=reference) for p in points
     ]
     now: list[AdjustPoint] = []
-    for (m, _), g in group_by(moved, lambda p: (p.mode, round_even(p.setpoint_c / _SAME_SETPOINT_C))):
+    for (m, _), g in group_by(moved, lambda p: (p.mode, setpoint_key(p.setpoint_c))):
         hw = (
             math.sqrt(stats.total(p.half_width_c * p.half_width_c for p in g)) / len(g)  # type: ignore[operator]
             if all(p.half_width_c is not None for p in g)
@@ -234,9 +241,10 @@ def _advise_group(
         )
     now.sort(key=lambda p: (p.mode, p.setpoint_c))
 
-    base = current_c if current_c is not None else 0.0
-    lo = -options.range_c - base
-    hi = options.range_c - base
+    # The changes that keep the setting within its range. Without the current setting, only the changes possible
+    # from any setting in the range are certain: up to twice the range either way.
+    lo = -options.range_c - current_c if current_c is not None else -2 * options.range_c
+    hi = options.range_c - current_c if current_c is not None else 2 * options.range_c
     change, clamped = _best(now, options, G, lo, hi)
 
     residuals = [Residual(p.mode, p.setpoint_c, p.offset_c, p.offset_c + G(p.mode) * change, p.half_width_c) for p in now]
@@ -277,7 +285,8 @@ def mode_gains(points: list[AdjustPoint], options: AdjustmentOptions) -> dict[Ov
         num = 0.0
         den = 0.0
         variance = 0.0
-        for _, lst in group_by(group, lambda p: round_even(p.setpoint_c / _SAME_SETPOINT_C)):
+        every_half_width = True  # a point without one leaves the gain's uncertainty unknown
+        for _, lst in group_by(group, lambda p: setpoint_key(p.setpoint_c)):
             for i in range(len(lst)):
                 for j in range(i + 1, len(lst)):
                     dk = lst[j].adjustment_c - lst[i].adjustment_c
@@ -285,12 +294,16 @@ def mode_gains(points: list[AdjustPoint], options: AdjustmentOptions) -> dict[Ov
                         continue  # too small a change to measure anything
                     num += (lst[j].offset_c - lst[i].offset_c) * dk
                     den += dk * dk
-                    hi_ = lst[i].half_width_c if lst[i].half_width_c is not None else 1.0
-                    hj = lst[j].half_width_c if lst[j].half_width_c is not None else 1.0
-                    pair_hw = math.pow(hi_, 2) + math.pow(hj, 2)
-                    variance += pair_hw * dk * dk
+                    hi_ = lst[i].half_width_c
+                    hj = lst[j].half_width_c
+                    if hi_ is not None and hj is not None:
+                        variance += (hi_ * hi_ + hj * hj) * dk * dk
+                    else:
+                        every_half_width = False
         if den > 0:
-            result[mode] = ModeGain(num / den, GainSource.Measured, math.sqrt(variance) / den)
+            result[mode] = ModeGain(
+                num / den, GainSource.Measured, math.sqrt(variance) / den if every_half_width else None
+            )
             continue
         known = options.known_gains
         if known is not None and mode in known:
@@ -314,8 +327,15 @@ def _best(
         return 0.0, False  # the adjustment doesn't move the oven: nothing to recommend
     step = options.step_c
     if options.favour_c is not None:
-        g = stats.average(gain(p.mode) for p in now)
-        wanted = _snap(-_error_at(now, options.favour_c) / g, step)
+        # Right at one temperature: the change that makes each mode's error there (from its own straight line)
+        # smallest, in least squares, each mode moving by its own gain. With one mode, simply −error / gain.
+        sg_e = 0.0
+        sgg = 0.0
+        for m, lst in group_by(now, lambda p: p.mode):
+            g = gain(m)
+            sg_e += g * _error_at(lst, options.favour_c)
+            sgg += g * g
+        wanted = _snap(-sg_e / sgg, step)
         allowed = clamp(wanted, _snap_up(lo, step), _snap_down(hi, step))
         return allowed, abs(allowed - wanted) > 1e-9
 
@@ -365,25 +385,34 @@ def _dial_corrections(residuals: list[Residual]) -> list[DialCorrection]:
 
 def _add_setpoints(now: list[AdjustPoint]) -> tuple[list[float], str | None]:
     """Setpoints to add when the ones measured can't show whether the error changes with temperature."""
-    why: str | None = None
+    reasons: list[tuple[OvenMode, str]] = []
     add: list[float] = []
-    for _, g in group_by(now, lambda p: p.mode):
+    for mode, g in group_by(now, lambda p: p.mode):
         sps = sorted(distinct(p.setpoint_c for p in g))
         span = sps[-1] - sps[0]
         if len(sps) == 1:
-            why = "With one setpoint per mode, the app can't tell an error that's the same at every setting from one that grows with temperature."
+            reason = "With one setpoint per mode, the app can't tell an error that's the same at every setting from one that grows with temperature."
         elif span < SHAPE_SPAN_C:
-            why = "The setpoints are too close together to show how the error changes with temperature."
+            reason = "The setpoints are too close together to show how the error changes with temperature."
         elif len(sps) == 2 and abs(g[-1].offset_c - g[0].offset_c) >= WORTH_C:
-            why = "The error changes between the two setpoints. A third, in between, would show whether it changes in a straight line."
+            reason = "The error changes between the two setpoints. A third, in between, would show whether it changes in a straight line."
         else:
             continue
+        reasons.append((mode, reason))
 
         if len(sps) == 2 and span >= SHAPE_SPAN_C:
             add.append((sps[0] + sps[1]) / 2)
         else:
             add.append(sps[0] - SHAPE_SPAN_C)
             add.append(sps[-1] + SHAPE_SPAN_C)
+    # One reason when every mode that needs setpoints needs them for the same reason; otherwise each mode's.
+    distinct_reasons = distinct(r for _, r in reasons)
+    if not distinct_reasons:
+        why: str | None = None
+    elif len(distinct_reasons) == 1:
+        why = reasons[0][1]
+    else:
+        why = " ".join(f"{m.name}: {r}" for m, r in reasons)
     # Keep to ordinary baking temperatures (250–500 °F).
     return sorted(distinct(clamp(c, 121.0, 260.0) for c in add)), why
 

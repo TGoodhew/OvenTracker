@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 from ..jsonio import opt_float, parse_enum
-from ..netfmt import round_digits
 from ..units import OvenMode
 from . import stats
 from .setpoint_analyzer import PointMetrics
@@ -115,14 +114,19 @@ def group_by(items: Iterable[Any], key: Any) -> list[tuple[Any, list[Any]]]:
 
 def judge(m: PointMetrics, tolerance_c: float) -> Verdict:
     off = m.offset_c
-    if off is None:
-        return Verdict.Inconclusive
-    hw = m.half_width_c if m.half_width_c is not None else math.inf
-    if math.isinf(hw):
-        return Verdict.Borderline if abs(off) <= tolerance_c else Verdict.OutOfTolerance
-    if abs(off) + hw <= tolerance_c:
+    return Verdict.Inconclusive if off is None else judge_offset(off, m.half_width_c, tolerance_c)
+
+
+def judge_offset(offset_c: float, half_width_c: float | None, tolerance_c: float) -> Verdict:
+    """An error against the tolerance, given its ±95 % half-width (SessionSummary.Judge(offset, halfWidth,
+    tolerance)). Without a half-width the uncertainty is unknown, so an error within tolerance is only Borderline.
+    The verdicts and the report's "Within tolerance?" column both use this."""
+    hw = half_width_c
+    if hw is None:
+        return Verdict.Borderline if abs(offset_c) <= tolerance_c else Verdict.OutOfTolerance
+    if abs(offset_c) + hw <= tolerance_c:
         return Verdict.Accurate
-    if abs(off) - hw > tolerance_c:
+    if abs(offset_c) - hw > tolerance_c:
         return Verdict.OutOfTolerance
     return Verdict.Borderline
 
@@ -168,8 +172,10 @@ def by_mode(results: Iterable[PointResult]) -> list[ModeSummary]:
 
 
 def compare(results: Iterable[PointResult]) -> list[ModeComparison]:
+    from .adjustment_advisor import setpoint_key  # imports this module
+
     out: list[ModeComparison] = []
-    groups = group_by(usable(results), lambda r: round_digits(r.point.setpoint_c, 2))
+    groups = group_by(usable(results), lambda r: setpoint_key(r.point.setpoint_c))
     for _, g in sorted(groups, key=lambda kv: kv[0]):
         bake = next((r for r in reversed(g) if r.point.mode == OvenMode.Bake), None)
         conv = next((r for r in reversed(g) if r.point.mode == OvenMode.Convection), None)

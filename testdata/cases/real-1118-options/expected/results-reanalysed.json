@@ -76,7 +76,7 @@
         "setpointC": 176.66666666666666
       },
       "metrics": {
-        "setpointC": 176.667,
+        "setpointC": 176.66666666666666,
         "reason": "Aborted",
         "kind": "Cycle",
         "units": 2,
@@ -97,7 +97,7 @@
         "preheatSignalC": 180.24499999999998,
         "precisionTargetC": 1.6666666666666665,
         "longestGapSeconds": 983.5,
-        "offsetC": 9.367117916343432,
+        "offsetC": 9.367451249676776,
         "metPrecision": false
       },
       "afterReset": false,

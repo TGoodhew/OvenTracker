@@ -59,6 +59,8 @@ class SharedSettings:
             return "--adjust-range must be positive."
         if self.favour is not None and self.favour <= 0:
             return "--favour must be a temperature, e.g. 350."
+        if self.favour is not None and self.objective is not None:
+            return "--favour and --objective don't go together: --favour makes the oven right at one temperature, in place of an objective."
         if self.oven is not None and ovens.find(self.oven) is None:
             return f"--oven must be one of: {ovens.keys()}. To add yours, see docs/adding-an-oven.md."
         if self.probe is not None and probes.find(self.probe) is None:

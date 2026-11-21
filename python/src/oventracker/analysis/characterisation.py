@@ -11,7 +11,7 @@ from ..jsonio import NEWLINE, DateTimeOffset, opt_float
 from ..netfmt import fixed, round_even
 from ..units import OvenMode, UnitFormatter, mode_name
 from . import stats
-from .adjustment_advisor import AdjustmentAdvice, GainSource, ModeGain, advise
+from .adjustment_advisor import AdjustmentAdvice, GainSource, ModeGain, advise, setpoint_key
 from .session_summary import group_by
 
 if TYPE_CHECKING:
@@ -152,7 +152,7 @@ class Characterisation:
 
         groups = group_by(
             [r for r in results if r.metrics.mean_c is not None],
-            lambda r: (r.point.mode, round_even(r.point.setpoint_c / _SAME_C), round_even(adj(r) / _SAME_C)),
+            lambda r: (r.point.mode, setpoint_key(r.point.setpoint_c), round_even(adj(r) / _SAME_C)),
         )
         repeats = [
             Repeat(key[0], g[0].point.setpoint_c, adj(g[0]), [r.metrics.mean_c for r in g])

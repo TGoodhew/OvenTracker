@@ -186,8 +186,13 @@ public sealed class Report(SessionInfo info, IReadOnlyList<PointResult> results)
 
     public IEnumerable<string[]> ResidualRows(AdjustmentAdvice a) => a.Residuals.Select(r =>
     {
-        var hw = r.HalfWidthC ?? 0;
-        var ok = Math.Abs(r.AfterC) + hw <= info.ToleranceC ? "Yes" : Math.Abs(r.AfterC) - hw > info.ToleranceC ? "No" : "Borderline";
+        // The same judgement as the verdicts: without a ±95 %, an error within tolerance is only Borderline.
+        var ok = SessionSummary.Judge(r.AfterC, r.HalfWidthC, info.ToleranceC) switch
+        {
+            Verdict.Accurate => "Yes",
+            Verdict.OutOfTolerance => "No",
+            _ => "Borderline",
+        };
         return new[] { Temp.ModeName(r.Mode), f.Setpoint(r.SetpointC), f.D(r.NowC), f.D(r.AfterC), r.HalfWidthC is { } h ? f.Span(h) : "—", ok };
     });
 
@@ -201,7 +206,9 @@ public sealed class Report(SessionInfo info, IReadOnlyList<PointResult> results)
     /// <summary>What the tracking time came to, and what to allow next time.</summary>
     public IEnumerable<string> Durations()
     {
-        var done = results.Where(r => r.Metrics.Reason == CompletionReason.Converged).ToList();
+        // The setpoints that settled and met this analysis's precision: a re-analysis with a tighter --precision can
+        // find a point the live run settled that hasn't met it, and its time says nothing about what's needed.
+        var done = results.Where(r => r.Metrics is { Reason: CompletionReason.Converged, MetPrecision: true }).ToList();
         if (done.Count == 0) yield break;
         var first = done[0];
         var rest = done.Skip(1).Select(r => r.Metrics.TotalMinutes).ToList();
@@ -241,7 +248,8 @@ public sealed class Report(SessionInfo info, IReadOnlyList<PointResult> results)
         sb.AppendLine();
         Table(sb, PointColumns, PointRows().Select(r => r.Cells));
         sb.AppendLine();
-        sb.AppendLine("*Measured* is the time-weighted mean over whole thermostat cycles once the oven had settled; *±95 %* is how sure that mean is. " +
+        // One paragraph: the notes on started-warm and after-reset setpoints follow on the same line.
+        sb.Append("*Measured* is the time-weighted mean over whole thermostat cycles once the oven had settled; *±95 %* is how sure that mean is. " +
                       "*Swing* is the average peak-to-peak of a cycle and *Range* the lowest and highest readings while measuring. " +
                       "*To temp* is from pressing Start to first reaching the setting (or the thermostat first turning round, for an oven that runs cold); " +
                       "*First peak* is the first high point against the setting, which is the overshoot when it is positive.");

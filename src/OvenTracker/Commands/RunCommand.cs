@@ -335,10 +335,14 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
         var characterising = s is CharacteriseSettings || resumed?.Info.Characterise is not null;
         if (resumed is null && s is CharacteriseSettings) plan = [.. plan.Select(p => p with { AdjustmentC = adjustmentC ?? 0 })];
 
-        // What's already done, when resuming: the setpoints that finished (by themselves or by choice), with the plan's adjustment for each.
-        var done = resumed is null ? [] : Replay.Analyze(resumed.Csv, options)
-            .Where(r => r.Metrics.Reason is CompletionReason.Converged or CompletionReason.TimedOut or CompletionReason.Manual)
+        // When resuming, everything the earlier sittings measured, with the plan's adjustment for each. The setpoints
+        // that finished (by themselves or by choice) are done; the others (interrupted or skipped) are measured again,
+        // and until they are, their earlier result stays in the results, as analyze shows it.
+        var earlier = resumed is null ? [] : Replay.Analyze(resumed.Csv, options, plan)
             .Select(r => r with { Point = plan.FirstOrDefault(p => p.Index == r.Point.Index) ?? r.Point })
+            .ToList();
+        var done = earlier
+            .Where(r => r.Metrics.Reason is CompletionReason.Converged or CompletionReason.TimedOut or CompletionReason.Manual)
             .ToList();
         var todo = plan.Where(p => done.All(d => d.Point.Index != p.Index)).ToList();
         if (resumed is not null && todo.Count == 0 && resumed.Info.Characterise is not { ChangedToC: null })
@@ -429,11 +433,14 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
             appSettings.Save();
         }
         using var recorder = new RunRecorder(outDir, info, append: resumed is not null);
-        if (resumed is not null) recorder.Note(DateTimeOffset.UtcNow, "resume");
+        // A simulation's readings carry its own, faster clock: its events take the time of the latest reading, so
+        // readings.csv stays in time order within a sitting. (A resumed simulation's clock starts again from the PC's.)
+        if (driver.IsSimulation) recorder.Clock = () => recorder.LastReadingTime ?? DateTimeOffset.UtcNow;
+        if (resumed is not null) recorder.Note(recorder.Now, "resume");
         using var poller = new MeterPoller(meter, TimeSpan.FromSeconds(s.Interval), driver.IsSimulation ? s.Speed : 1, connected: true);
         poller.Start();
 
-        var results = new List<PointResult>(done);
+        var results = new List<PointResult>(earlier);
         var meterLabel = driver.IsSimulation ? "simulated meter" : $"{identity.Model} on {meter.Location}";
         var tracker = new PointTracker(poller, recorder, f, options, toleranceC, meterLabel, driver.NotTemperatureHelp, plan.Count, driver.IsSimulation, driver.AutoPowerOff, sensor?.MaxC);
         var waiter = new ResetWaiter(poller, recorder, f, ambientC ?? AssumedAmbientC, ambientC is null, driver.IsSimulation, driver.AutoPowerOff);
@@ -492,7 +499,7 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
             plan = [.. plan, .. phase2];
             info = info with { Plan = plan, AdjustmentC = to, Characterise = ch with { ChangedToC = to, ChangedAt = DateTimeOffset.Now } };
             recorder.UpdateSession(info);
-            recorder.Note(DateTimeOffset.UtcNow, $"adjustment-changed:{to.ToString("F3", Inv)}");
+            recorder.Note(recorder.Now, $"adjustment-changed:{to.ToString("F3", Inv)}");
             todo.AddRange(phase2);
             previous = null;
             lastDone = $"The adjustment is {toText} now. Phase 2: {phase2.Count} setpoints.";
@@ -546,11 +553,11 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
 
                 if (s.SimForget != point.Index) oven?.SetOven(point.Mode, point.SetpointC);
                 var idle = DrainIdle(poller, recorder);
-                if (afterReset) recorder.Note(DateTimeOffset.UtcNow, "reset");
+                if (afterReset) recorder.Note(recorder.Now, "reset");
                 // The first setpoint of a new session, started without letting a warm oven cool. Judged by the oven when it
                 // was asked, not now: by now it may be heating for this setpoint.
                 var startedWarm = resumed is null && !afterReset && point.Index == plan[0].Index && hotAtPrompt;
-                if (startedWarm) recorder.Note(DateTimeOffset.UtcNow, "started-warm");
+                if (startedWarm) recorder.Note(recorder.Now, "started-warm");
                 // Where the oven starts from: the setpoint just measured, if it went straight on from it, or its last two minutes.
                 var from = previous?.Metrics.MeanC ?? StartingFrom(idle, poller.LastCelsius);
                 var (result, pointOutcome) = await tracker.RunAsync(point, ct, from, previous?.Metrics.SwingC);

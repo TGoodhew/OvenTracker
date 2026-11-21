@@ -123,8 +123,9 @@ turns a median absolute value into σ.)
 
 `SetpointAnalyzer.cs`. One analyser per setpoint attempt. Its input is the setpoint `S` (°C) and, in order,
 each `Ok` reading as (t, c): t the elapsed seconds, c °C. In a replay these are the values as written in
-`readings.csv` (`F1` seconds, `F2` °C, an `F3` setpoint), so a replay can differ slightly from the live run
-that recorded it (as implemented; see [Porting notes](#porting-notes)).
+`readings.csv`. Recordings now write them at full precision (round-trip), and the setpoint is the plan's, so a
+replay gives exactly what the live run did. Older recordings rounded them (`F1` seconds, `F2` °C, an `F3`
+setpoint), so a replay of one can differ slightly from the live run (see [Porting notes](#porting-notes)).
 
 ### State
 
@@ -242,8 +243,9 @@ the heat-up and the first peak are never part of a unit.
 
 For a Trough `tp` (with `kind` not Block):
 
-- If `phase` is Measuring: close the cycle `[unitStart, tp.T]`, then `unitStart = tp.T`. `unitStart` moves even
-  when the cycle is too short to keep (as implemented: the short piece is lost, not joined to the next).
+- If `phase` is Measuring: close the cycle `[unitStart, tp.T]`. If it was kept, `unitStart = tp.T`. If it was
+  too short to keep (under `MinUnitSeconds`, 20 s), `unitStart` stays where it was: the trough was a disturbance,
+  and the cycle carries on to the next one.
 - Otherwise, if `phase` is Settling and `turningPoints` holds at least 2: `phase = Measuring`,
   `kind = Cycle`, `measuringStart = tp.T`, `unitStart = tp.T`.
 
@@ -310,7 +312,7 @@ With the units kept (no estimate without units), and `means` their `meanC` in or
 | Value | Rule |
 | --- | --- |
 | n | the number of units |
-| mean | `mean(means)`: every unit counts the same, whatever its length (as implemented) |
+| mean | `mean(means)`: every unit counts the same, whatever its length. Each whole thermostat cycle is one sample of the oven's behaviour (the method of batch means), and its own mean is time-weighted. |
 | standard deviation | `sd(means)` (n − 1; 0 for one unit) |
 | half-width | the [95 % half-width](#statistics) of `means`: none for n < 2 |
 | drift | for n ≥ 3, `fit(mid, means).slope · 3600` °C per hour (none if the fit is none) |
@@ -324,9 +326,9 @@ A setpoint completes when the first of these happens:
 
 | Reason | When |
 | --- | --- |
-| `Converged` | A unit closes, and then there are at least `minUnits` units and the half-width is at most `o.precisionC` (no slack in the comparison). |
+| `Converged` | A unit closes, and then there are at least `minUnits` units and `WithinPrecision(halfWidth, o.precisionC)`. |
 | `TimedOut` | A sample with `t ≥ o.maxPointMinutes · 60` arrives, after that sample's processing, if it is still not complete. |
-| `Manual` | The user finished it early (N twice). Live, or a replayed `end:` (below). |
+| `Manual` | The user finished it early (N twice). |
 | `Skipped` | The user skipped it (S twice). |
 | `Aborted` | The session stopped (Q twice, Ctrl+C, an error), or a replay found no end. |
 | `None` | Never completed. Not written in practice. |
@@ -334,12 +336,12 @@ A setpoint completes when the first of these happens:
 Completing sets `phase = Complete`, `reason`, and `completedAt = now`. Later samples are ignored.
 `finish(reason)` completes with `reason` only if it isn't already complete.
 
-What a replay does with each `end:` reason: `end:Converged` and `end:TimedOut` come back by themselves when the
-replay sees the same readings with the same options, so the replay calls `finish(Manual)`. If the replay has
-completed by itself, as it does with the same options, that does nothing. If it hasn't (for example with a
-tighter `--precision` or more `--min-cycles`), the setpoint is reported as finished early by the user (as
-implemented). `end:Manual`, `end:Skipped`, `end:Aborted` and `end:None` call `finish` with that reason. A replay
-with looser options can converge sooner than the live run did; the readings after that are ignored.
+What a replay does with each `end:` reason: it calls `finish` with the recorded reason. With the same options
+the replay has already completed by itself at the same reading, so that does nothing. If it hasn't (for example
+with a tighter `--precision` or more `--min-cycles`), the recorded reason still says why the readings end
+there: a setpoint that converged live is still reported as settled and measured, and `metPrecision` says that
+this analysis's target wasn't met. A replay with looser options can converge sooner than the live run did; the
+readings after that are ignored.
 
 ### Preheat signal
 
@@ -375,9 +377,9 @@ as live.
 | `precisionTargetC` | `o.precisionC` |
 | `longestGapSeconds` | the largest difference between consecutive accepted samples' t; none with fewer than 2 |
 | `offsetC` | `meanC − setpointC` |
-| `metPrecision` | `halfWidthC` exists and `halfWidthC ≤ precisionTargetC + 1e-9` |
+| `metPrecision` | `halfWidthC` exists and `WithinPrecision(halfWidthC, precisionTargetC)` |
 
-`metPrecision` has a 1e-9 slack that the stopping rule doesn't (as implemented).
+`WithinPrecision(hw, target)` is `hw ≤ target + 1e-9`. The stopping rule uses the same test.
 
 ## Replay
 
@@ -397,7 +399,9 @@ Skip the header line. For each later line, split on `,` into fields f[0], f[1], 
 2. **Point 0.** If f[5] is `Event`: `resume` or `reset` sets `resetPending`; `started-warm` sets `warmPending`.
    Every point-0 line is then skipped.
 3. Otherwise parse the mode f[2] (`Bake` or `Convection`, exact case), the setpoint f[3] (a double), and the
-   elapsed f[4] (a double; 0 if empty or unparsable).
+   elapsed f[4] (a double; 0 if empty or unparsable). If the replay was given the run's plan and its point with
+   index f[1] is within 0.001 °C of f[3], the setpoint is the plan's (exact, where an older recording's f[3]
+   is rounded to three decimals).
 4. **An event** (f[5] is `Event`), by its name f[8]:
    - `start`: close with Aborted; remove from the results every result whose point has this index; set
      `afterReset = resetPending` and `startedWarm = warmPending`, then clear both pending marks; open a new
@@ -405,8 +409,7 @@ Skip the header line. For each later line, split on `,` into fields f[0], f[1], 
    - `restart`: open a new analyser and point, discarding the open one without a result. `afterReset` and
      `startedWarm` stay as they were.
    - `preheat-signal`: mark the preheat signal on the open analyser, if any.
-   - `end:<reason>`, if an analyser is open: close with Manual if the reason is `Converged` or `TimedOut`,
-     otherwise with the reason. An unknown reason is an error.
+   - `end:<reason>`, if an analyser is open: close with the reason. An unknown reason is an error.
    - Anything else: nothing.
 5. **A reading:** if no analyser is open, or the open point's index isn't f[1], or f[5] isn't `Ok`, skip it.
    Otherwise, if f[6] parses as a double, `add(elapsed, f[6])`.
@@ -423,8 +426,9 @@ The replayed point has no `adjustmentC`. `analyze` then puts the plan's point in
 different adjustments measure how far the adjustment moves the oven.
 
 **Loading.** A run is a folder holding `readings.csv` and `session.json`, or a `readings.csv` path. Without a
-`session.json` the session is a default (as implemented): `unit` Fahrenheit, `toleranceC` 15/1.8, the default
-AnalysisOptions (precision 1.0 °C), an empty plan, `started` the CSV's creation time.
+`session.json` the session is a default for a °F oven, as `run` would make one: `unit` Fahrenheit, `toleranceC`
+15/1.8, the default AnalysisOptions with `precisionC` 2/1.8 (2 °F), an empty plan, `started` the CSV's creation
+time.
 
 **The unit** for reading the options is the latest run's (by `started`).
 
@@ -434,19 +438,20 @@ unit) and `minCycles` by `--min-cycles`, when given.
 **One run:**
 
 - The session is the run's, with `adjustmentC = --adjustment ?? the run's adjustmentC` (the option wins).
-- Replay it with its options. Each result's point is replaced by the plan's point with the same index, if
-  there is one. So the point has the plan's full-precision setpoint and its `adjustmentC`, while the metrics
-  keep the CSV's three-decimal setpoint.
+- Replay it with its options and its plan. Each result's point is replaced by the plan's point with the same
+  index, if there is one, so it has the plan's `adjustmentC`. The results are in order of point index, as a
+  live run writes them. The point and the metrics have the same, exact setpoint.
 
 **Several runs:**
 
 - Order them by `started`.
-- For each run, `adj = run.adjustmentC ?? --adjustment ?? 0`. Replay it with its own options. For each result,
-  in order, the point becomes the replayed point (the CSV's setpoint, three decimals) with
-  `index` = the number of results so far + 1, and `adjustmentC` = the `adjustmentC` of the run's plan point
-  with the original index, if it has one, else `adj`.
-- The session is the latest run's, with `adjustmentC = latest.adjustmentC ?? --adjustment ?? 0` (so it is
-  never unknown, as implemented) and `plan` = the combined results' points.
+- For each run, `adj = run.adjustmentC ?? --adjustment ?? 0`. Replay it with its own options and its plan.
+  For each result, in order of point index, the point becomes the replayed point with `index` = the number of
+  results so far + 1, and `adjustmentC` = the `adjustmentC` of the run's plan point with the original index,
+  if it has one, else `adj`.
+- The session is the latest run's, with `adjustmentC = latest.adjustmentC ?? --adjustment`: unknown stays
+  unknown, as for a single run, so the report says "change it by" rather than "set it to". `plan` = the
+  combined results' points.
 
 **Then, either way,** the session's fields become:
 
@@ -478,6 +483,9 @@ the offset and its 95 % half-width with the session's `toleranceC` (T):
 
 In words: accurate when the whole interval is within tolerance, out of tolerance when the whole interval is
 outside it, borderline when it straddles the limit.
+
+The rows after the first are `Judge(offset, halfWidth, T)`, which the report's "Within tolerance?" column also
+uses for the error left after adjusting.
 
 The verdict uses neither the completion reason (an Aborted setpoint with a mean is judged like any other) nor
 the sensor's tolerance. The probe's own accuracy is reported beside the verdict, not added to it (as
@@ -536,11 +544,13 @@ with a mean.
 | mean swing | mean of the non-null `swingC`, or none |
 | mean cycle | mean of the non-null `cycleMinutes`, or none |
 
-**Comparisons** of bake and convection: group the usable results by `round(point.setpointC, 2)`, in ascending
-order. In each group take the *last* Bake result and the *last* Convection result; when there are both,
+**Comparisons** of bake and convection: group the usable results by `SetpointKey(point.setpointC)`, in
+ascending order. In each group take the *last* Bake result and the *last* Convection result; when there are both,
 `Δ = convection meanC − bake meanC`, and the difference is **significant** when `|Δ| > sqrt(a² + b²)`, a and b
-being their half-widths (+∞ when missing, so never significant then). This groups setpoints by two decimals,
-while the recommended adjustment groups them within 0.05 °C (as implemented).
+being their half-widths (+∞ when missing, so never significant then).
+
+`SetpointKey(c) = round(c / 0.05)` (round half to even): setpoints in the same 0.05 °C step are the same
+setpoint. Everything that groups setpoints uses it, here and in the recommended adjustment.
 
 ## The recommended adjustment
 
@@ -589,11 +599,11 @@ Each group gives one advice.
 
 For each mode in the group (in order of first appearance), from that mode's points:
 
-1. **Measured.** Group the points by setpoint key. In each group, for every pair i < j in order:
+1. **Measured.** Group the points by `SetpointKey`. In each group, for every pair i < j in order:
    `dk = adjⱼ − adjᵢ`; skip the pair if `|dk| < 2·stepC − 1e-9` (too small a change to measure anything);
-   otherwise `num += (offsetⱼ − offsetᵢ)·dk`, `den += dk²` and `var += (hwᵢ² + hwⱼ²)·dk²`, taking a missing
-   half-width as 1 °C (as implemented). If `den > 0`: gain `num / den`, source `Measured`, half-width
-   `sqrt(var) / den`.
+   otherwise `num += (offsetⱼ − offsetᵢ)·dk`, `den += dk²` and, when both have a half-width,
+   `var += (hwᵢ² + hwⱼ²)·dk²`. If `den > 0`: gain `num / den`, source `Measured`, half-width `sqrt(var) / den`,
+   or none if any pair used lacked a half-width (its uncertainty is then unknown).
 2. **Profile.** Otherwise, if `knownGains` has the mode: that gain, source `Profile`, no half-width.
 3. **Assumed.** Otherwise 1.0, source `Assumed`, no half-width. With model `Gain`, if
    `fit(setpointC, setpointC + offsetC)` over the mode's points has `0.5 < slope < 1.5`, the slope instead.
@@ -609,17 +619,19 @@ half-width is present (else none), and adjustment `ref`. Sort by mode, Bake firs
 
 ### The search
 
-`lo = −rangeC − (current ?? 0)` and `hi = rangeC − (current ?? 0)`: the changes that keep the setting within the
-range. With no current adjustment, the range is taken about 0 (as implemented).
+With a current adjustment, `lo = −rangeC − current` and `hi = rangeC − current`: the changes that keep the
+setting within the range. Without one, how much of the range is left can't be known, so only the changes that
+are impossible from every setting are ruled out: `lo = −2·rangeC`, `hi = 2·rangeC`.
 
 All the following are over the points now, each with its mode's gain g.
 
 1. If every point's gain is at most 0.05, the adjustment doesn't move the oven: the change is 0, not clamped.
-2. **Favour**, when `favourC` is set (the objective is then ignored, as implemented). `ḡ` is the mean gain over
-   the points (one per point, not per mode). The error at the favoured temperature is
-   `intercept + slope · favourC` from `fit(setpointC, offset)` over the points (both modes in one line when
-   they share an adjustment, as implemented), or the mean offset if the fit is none.
-   `wanted = snap(−error / ḡ)`, with `snap(c) = roundHalfAwayFromZero(c / stepC) · stepC`. The change is
+2. **Favour**, when `favourC` is set. It takes the place of the objective, so `--favour` can't be given with
+   `--objective`. For each mode m among the points, `eₘ` is its error at the favoured temperature,
+   `intercept + slope · favourC` from `fit(setpointC, offset)` over that mode's points, or their mean offset
+   if the fit is none, and `gₘ` is its gain. The change makes those errors smallest together, in least squares,
+   each mode one term however many setpoints it has: `wanted = snap(−Σ gₘ·eₘ / Σ gₘ²)`. With one mode this is
+   `snap(−e / g)`. `snap(c) = roundHalfAwayFromZero(c / stepC) · stepC`. The change is
    `wanted` clamped to `[snapUp(lo), snapDown(hi)]`, with `snapUp(c) = ceil(c / stepC − 1e-9) · stepC` and
    `snapDown(c) = floor(c / stepC + 1e-9) · stepC`. It is clamped when `|change − wanted| > 1e-9`.
 3. **Balanced or Minimax.** The cost of a change Δ: for Balanced, `Σ (offset + g·Δ)²`; for Minimax,
@@ -630,8 +642,6 @@ All the following are over the points now, each with its mode's gain g.
    change). With `reach = 4·rangeC + max |offset| / max(0.05, min g)`, `anywhere = bestIn(−reach, reach)` and
    the change is `bestIn(lo, hi)`. It is clamped when `anywhere < lo − 1e-9` or `anywhere > hi + 1e-9`.
 
-[docs/oven-control-model.md](../docs/oven-control-model.md) says the app compares the two neighbouring steps;
-the code searches every step. For these convex costs the result is the same, ties apart.
 
 ### The advice
 
@@ -668,8 +678,9 @@ the code searches every step. For these convex costs the result is the same, tie
 
 For a mode that needs setpoints: with two setpoints and `span ≥ ShapeSpanC`, add their midpoint; otherwise add
 `first − ShapeSpanC` and `last + ShapeSpanC`. Then clamp each to [121, 260] °C (ordinary baking temperatures,
-250–500 °F), drop exact duplicates, and sort. `tooFewSetpoints` is the reason of the last mode that needed
-setpoints (as implemented: one mode's reason overwrites another's, while the setpoints of both are kept).
+250–500 °F), drop exact duplicates, and sort. `tooFewSetpoints` is the reason when every mode that needs
+setpoints needs them for the same reason, or, when their reasons differ, each mode's as `<Mode>: <reason>`,
+joined by spaces, in mode order. None when no mode needs any.
 
 **Curved.** For each mode with at least 3 points now: `fit(setpoint, offset)`; if the fit exists and
 `max over the points of (|offset − (intercept + slope·setpoint)| − (hw ?? 0))` is greater than
@@ -769,7 +780,8 @@ Settings: precision ±{Span(precisionC)}, at least {minCycles} cycles, up to {ma
 ```
 
 The sittings part appears only with more than one sitting. Each optional section ends with a blank line. The
-local time is in the PC's time zone (as implemented; see [Porting notes](#porting-notes)).
+times are shown in the offset they were saved with, formatted `yyyy-MM-dd HH:mm` in the invariant culture, so
+the report reads the same on any PC.
 
 The explanation is one line: "*Measured* is the time-weighted mean over whole thermostat cycles once the oven had
 settled; *±95 %* is how sure that mean is. *Swing* is the average peak-to-peak of a cycle and *Range* the lowest
@@ -885,9 +897,9 @@ adjustment by {D(change, 0)}, from whatever it is set to now."
 Each detail is written `- {detail}`.
 
 **Residual table:** `Mode | Set | Now | After adjusting | ±95 % | Within tolerance?`; per residual: the mode,
-`Setpoint`, `D(nowC)`, `D(afterC)`, `Span(halfWidthC)` or `—`, and `Yes` if `|after| + hw ≤ T`, `No` if
-`|after| − hw > T`, else `Borderline`, with hw the half-width, or 0 if none. (Here a missing half-width counts
-as 0, where the verdict counts it as infinite: as implemented.)
+`Setpoint`, `D(nowC)`, `D(afterC)`, `Span(halfWidthC)` or `—`, and the verdict's judgement of `afterC` with
+its half-width, `Judge(afterC, halfWidthC, T)`: `Yes` for Accurate, `No` for Out of tolerance, otherwise
+`Borderline`. A missing half-width is treated as it is in the verdict: within tolerance is only Borderline.
 
 **Dial table:** `Mode | For | Set the oven to`; per correction: the mode, `Setpoint(wantC)`, and
 `{round(toDisplay(setC)) formatted 0} {symbol}`.
@@ -1006,19 +1018,18 @@ Things that decide whether the numbers match:
 - **The smoothing's running sum.** Keep it as [described](#smoothing). It is the one place where a
   mathematically equal formulation changes the results.
 - **The t table**, not a quantile function.
-- **Replay precision.** A replay sees `F1` seconds, `F2` °C and an `F3` setpoint. A live run's `results.json`
-  was worked out at full precision (and its `metrics.setpointC` is the plan's), so it can differ slightly from
-  `results-reanalysed.json` for the same run (as implemented). Two readings less than 0.05 s apart can share an
-  `elapsed_s`, and the series then rejects the second.
-- **Rounding.** C#'s `Math.Round(x)` and `Math.Round(x, n)` round a midpoint to even, as Python's `round(x)`
-  does; Python's `round(x, n)` rounds the exact binary value, which can differ from C# at a decimal tie. `snap`
-  in the favour rule rounds half away from zero. C#'s fixed-point formatting (`F1`, `F2`, `0.#`) rounds half away
-  from zero, while Python's `format` rounds the exact binary value half to even, so they can differ for a value
-  exactly at a tie, such as 2.5 with `F0`.
+- **Replay precision.** Recordings write `setpoint_c`, `elapsed_s` and `temp_c` at full precision
+  (round-trip), and the replay takes the plan's setpoint, so re-analysing a recording gives exactly the live
+  run's `results.json`. Recordings made before that have `F1` seconds, `F2` °C and an `F3` setpoint, so their
+  re-analysis can differ slightly from their live results; in them, two readings less than 0.05 s apart can
+  share an `elapsed_s`, and the series then rejects the second.
+- **Rounding.** C#'s `Math.Round(x)` rounds a midpoint to even, as Python's `round(x)` does, and
+  `Math.Round(x, n)` is correctly rounded, exactly as Python's `round(x, n)` (not by multiplying by 10ⁿ). `snap`
+  in the favour rule rounds half away from zero. Standard fixed-point formats (`F0`, `F1`, `F2`) round the exact
+  binary value half to even, exactly as Python's `%.nf` (`2.5` with `F0` is `2`). Custom formats (`0`, `0.#`,
+  `0.###`) first round to 15 significant digits, then half away from zero (`1.45` with `0.#` is `1.5`), and keep
+  the sign of a negative that rounds to zero (`-0`).
 - **Order.** Groups come in order of first appearance, then are sorted where this spec says. Modes sort Bake
-  before Convection. `results` from one run are in the order the setpoints closed, not sorted.
-- **The report's local times.** `started` and `sittings` are shown in the PC's time zone, not in the offset they
-  were saved with (as implemented). The test data's reports were made in US Pacific time, so a port comparing
-  reports must run in that time zone or convert the same way. The "Run" line's `yyyy-MM-dd HH:mm` is formatted
-  with the PC's culture (as implemented: a culture whose time separator isn't `:` changes it); the sittings use
-  the invariant culture.
+  before Convection. `results` are in order of point index, from `run` and from `analyze` alike.
+- **Times in the report.** `started`, the sittings and characterisation's "Measured" date are shown in the
+  offset they were saved with, in the invariant culture, never converted to the PC's time zone.

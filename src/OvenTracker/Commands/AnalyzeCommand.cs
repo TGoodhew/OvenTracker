@@ -61,7 +61,8 @@ public sealed class AnalyzeCommand : Command<AnalyzeSettings>
         var sessionPath = Path.Combine(dir, "session.json");
         var info = File.Exists(sessionPath)
             ? JsonSerializer.Deserialize<SessionInfo>(File.ReadAllText(sessionPath), Json.Options)!
-            : new SessionInfo(RunCommand.Version, File.GetCreationTime(csv), "unknown meter", "?", TempUnit.Fahrenheit, 15 / 1.8, new AnalysisOptions(), []);
+            // No session.json: take it as a °F oven with run's defaults for one (2 °F precision, 15 °F tolerance).
+            : new SessionInfo(RunCommand.Version, File.GetCreationTime(csv), "unknown meter", "?", TempUnit.Fahrenheit, 15 / 1.8, new AnalysisOptions { PrecisionC = 2 / 1.8 }, []);
         return new SavedRun(dir, csv, info);
     }
 
@@ -78,9 +79,10 @@ public sealed class AnalyzeCommand : Command<AnalyzeSettings>
         if (runs.Count == 1)
         {
             var only = runs[0].Info with { AdjustmentC = adjustmentC ?? runs[0].Info.AdjustmentC };
-            // Points keep the plan's adjustment (a characterise run has two).
-            var replayed = Replay.Analyze(runs[0].Csv, options(only))
-                .Select(r => r with { Point = only.Plan.FirstOrDefault(p => p.Index == r.Point.Index) ?? r.Point }).ToList();
+            // Points keep the plan's adjustment (a characterise run has two), in the plan's order, as `run` writes them.
+            var replayed = Replay.Analyze(runs[0].Csv, options(only), only.Plan)
+                .Select(r => r with { Point = only.Plan.FirstOrDefault(p => p.Index == r.Point.Index) ?? r.Point })
+                .OrderBy(r => r.Point.Index).ToList();
             return (only, replayed);
         }
 
@@ -89,7 +91,7 @@ public sealed class AnalyzeCommand : Command<AnalyzeSettings>
         foreach (var run in ordered)
         {
             var adj = run.Info.AdjustmentC ?? adjustmentC ?? 0;
-            foreach (var r in Replay.Analyze(run.Csv, options(run.Info)))
+            foreach (var r in Replay.Analyze(run.Csv, options(run.Info), run.Info.Plan).OrderBy(r => r.Point.Index))
             {
                 // A point keeps the adjustment its plan gave it (a characterisation has two); otherwise the run's.
                 var planned = run.Info.Plan.FirstOrDefault(p => p.Index == r.Point.Index)?.AdjustmentC;
@@ -97,7 +99,9 @@ public sealed class AnalyzeCommand : Command<AnalyzeSettings>
             }
         }
         var latest = ordered[^1].Info;
-        return (latest with { AdjustmentC = latest.AdjustmentC ?? adjustmentC ?? 0, Plan = results.Select(r => r.Point).ToList() }, results);
+        // The current adjustment is the latest run's, or --adjustment's. Unknown stays unknown (the report then says
+        // "change it by" rather than "set it to"), as for a single run.
+        return (latest with { AdjustmentC = latest.AdjustmentC ?? adjustmentC, Plan = results.Select(r => r.Point).ToList() }, results);
     }
 
     public override int Execute(CommandContext context, AnalyzeSettings s, CancellationToken cancellationToken)

@@ -84,7 +84,7 @@
         "setpointC": 176.66666666666666
       },
       "metrics": {
-        "setpointC": 176.667,
+        "setpointC": 176.66666666666666,
         "reason": "Converged",
         "kind": "Cycle",
         "units": 4,
@@ -104,7 +104,7 @@
         "totalMinutes": 33.93333333333333,
         "precisionTargetC": 1.1111111111111112,
         "longestGapSeconds": 1,
-        "offsetC": 7.49954726451702,
+        "offsetC": 7.499880597850364,
         "metPrecision": true
       },
       "afterReset": false,
@@ -117,7 +117,7 @@
         "setpointC": 218.33333333333334
       },
       "metrics": {
-        "setpointC": 218.333,
+        "setpointC": 218.33333333333334,
         "reason": "Converged",
         "kind": "Cycle",
         "units": 4,
@@ -132,13 +132,13 @@
         "cycleMinutes": 3.004166666666667,
         "startC": 178.7,
         "timeToSetpointMinutes": 4.383333333333334,
-        "overshootC": 12.36699999999999,
+        "overshootC": 12.366666666666646,
         "settleMinutes": 21.95,
         "measureMinutes": 12.016666666666667,
         "totalMinutes": 34.18333333333333,
         "precisionTargetC": 1.1111111111111112,
         "longestGapSeconds": 1,
-        "offsetC": 6.86284859959099,
+        "offsetC": 6.862515266257645,
         "metPrecision": true
       },
       "afterReset": false,
