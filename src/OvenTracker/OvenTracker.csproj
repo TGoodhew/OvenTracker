@@ -26,6 +26,7 @@
     <PackageReference Include="Spectre.Console.Cli" Version="0.57.2" />
     <PackageReference Include="System.IO.Ports" Version="11.0.0" />
     <PackageReference Include="System.Management" Version="11.0.0" />
+    <PackageReference Include="Tmds.DBus.Protocol" Version="0.95.2" />
   </ItemGroup>
 
 </Project>

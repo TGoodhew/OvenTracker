@@ -11,7 +11,7 @@ port doesn't cover it, or a `parity` issue is open), or **Python**.
 - `spec/`: the recording formats, with JSON Schemas, and the analysis, written down for both
   implementations. `testdata/`: recorded runs with their expected results, which both must reproduce. Has: **both**.
 - `analyze --out <DIR>`, and `analyze` also writes `results-reanalysed.json` (or `results-combined.json`). Has: **both**.
-- A driver for the EEVblog 121GW over Bluetooth LE (Windows; Linux is #34). Has: **C#**.
+- A driver for the EEVblog 121GW over Bluetooth LE, on Windows and (through BlueZ) Linux. Has: **C#**.
 - A driver for the HP/Agilent 34401A with a PT100, through GPIB or RS-232, and `--meter-option`. Has: **C#**.
 - The report shows times in the offset they were recorded with, not the PC's time zone. Has: **both**.
 - Choose the connection type with `--resource` (serial settings, GPIB, VISA). Has: **C#**.

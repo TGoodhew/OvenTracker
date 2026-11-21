@@ -4,8 +4,8 @@ namespace OvenTracker.Meter;
 
 /// <summary>
 /// An EEVblog 121GW over Bluetooth LE, with a type K thermocouple in its temperature mode. On Windows the
-/// meter must be paired first (Windows Bluetooth settings, Add device). It finds a paired 121GW by itself.
-/// On Linux it isn't supported yet (issue #34).
+/// meter must be paired first (Windows Bluetooth settings, Add device). On Linux it goes through BlueZ, which
+/// needs no pairing but finds a known device faster. It finds a 121GW by itself.
 /// </summary>
 public sealed class Eevblog121GwDriver : IMeterDriver
 {
@@ -19,9 +19,14 @@ public sealed class Eevblog121GwDriver : IMeterDriver
 
     public string ResourceHelp => "a paired Bluetooth LE meter, by address or name, e.g. ble:C4:BE:84:12:34:56 or ble:121GW (found by itself if left out)";
 
-    public string NotFoundHelp => BleLinks.IsSupported
-        ? "Check the meter is on, with Bluetooth on (BT shows on its display; holding the 1ms PEAK button turns Bluetooth on or off), " +
-          "and that it's paired in Windows Bluetooth settings (Add device, Bluetooth, then choose 121GW)."
+    public string NotFoundHelp =>
+        OperatingSystem.IsWindows()
+            ? "Check the meter is on, with Bluetooth on (BT shows on its display; holding the 1ms PEAK button turns Bluetooth on or off), " +
+              "and that it's paired in Windows Bluetooth settings (Add device, Bluetooth, then choose 121GW)."
+        : OperatingSystem.IsLinux()
+            ? "Check the meter is on, with Bluetooth on (BT shows on its display; holding the 1ms PEAK button turns Bluetooth on or off), " +
+              "and that BlueZ is running (sudo systemctl enable --now bluetooth). Making it known speeds things up: " +
+              "bluetoothctl, then scan on, wait for 121GW, then trust <address>."
         : BleLinks.NotSupportedHelp;
 
     public string NotTemperatureHelp => "Turn the dial to temperature with the thermocouple plugged in, and turn off HOLD, REL and MIN/MAX.";
@@ -56,6 +61,11 @@ public sealed class Eevblog121GwDriver : IMeterDriver
         var order = new List<BleDevice>();
         if (request.Preferred is { } pref && ResourceSpec.Parse(pref) is { Transport: Transport.Ble } ps && Resolve(ps.Address) is { } last) order.Add(last);
         order.AddRange(Paired121Gws());
+        if (order.Count == 0 && OperatingSystem.IsLinux())
+        {
+            request.Progress?.Invoke("a 121GW nearby (scanning for a few seconds)");
+            order.AddRange(BleLinks.Scan().Where(Is121Gw));
+        }
         foreach (var d in order.DistinctBy(d => d.Address))
         {
             request.Progress?.Invoke($"{d.Name} {d.Address} (Bluetooth LE can take a few seconds)");
@@ -75,8 +85,11 @@ public sealed class Eevblog121GwDriver : IMeterDriver
         var devices = BleLinks.List();
         if (BleLinks.NormalizeAddress(what) is { } address)
             return devices.FirstOrDefault(d => d.Address == address) ?? new BleDevice(Gw121Protocol.AdvertisedName, address);
-        return devices.FirstOrDefault(d => string.Equals(d.Name, what, StringComparison.OrdinalIgnoreCase))
-            ?? devices.FirstOrDefault(d => d.Name.StartsWith(what, StringComparison.OrdinalIgnoreCase));
+        return Named(devices, what) ?? (OperatingSystem.IsLinux() ? Named(BleLinks.Scan(), what) : null);
+
+        static BleDevice? Named(IReadOnlyList<BleDevice> list, string name) =>
+            list.FirstOrDefault(d => string.Equals(d.Name, name, StringComparison.OrdinalIgnoreCase))
+            ?? list.FirstOrDefault(d => d.Name.StartsWith(name, StringComparison.OrdinalIgnoreCase));
     }
 
     public IReadOnlyList<MeterCandidate> Discover() =>
