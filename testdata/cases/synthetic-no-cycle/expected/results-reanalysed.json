@@ -1,0 +1,75 @@
+{
+  "session": {
+    "appVersion": "1.0.0",
+    "started": "2026-01-10T10:00:00-08:00",
+    "meter": "synthetic",
+    "location": "none",
+    "unit": "Fahrenheit",
+    "toleranceC": 8.333333333333334,
+    "options": {
+      "precisionC": 1.1111111111111112,
+      "minCycles": 4,
+      "minBlocks": 5,
+      "blockMinutes": 3,
+      "minHysteresisC": 1,
+      "smoothingSeconds": 5,
+      "maxPointMinutes": 120,
+      "noCycleMinutes": 15,
+      "flatWindowMinutes": 10,
+      "flatSlopeCPerMinute": 0.15,
+      "driftHorizonMinutes": 30,
+      "defaultCycleMinutes": 6
+    },
+    "plan": [
+      {
+        "index": 1,
+        "mode": "Bake",
+        "setpointC": 176.66666666666666
+      }
+    ],
+    "driver": "synthetic",
+    "adjustmentC": 0,
+    "adjust": {
+      "stepC": 0.5555555555555556,
+      "rangeC": 19.444444444444443,
+      "objective": "Balanced",
+      "model": "Shift",
+      "sharedAcrossModes": true
+    },
+    "ambientC": 21
+  },
+  "results": [
+    {
+      "point": {
+        "index": 1,
+        "mode": "Bake",
+        "setpointC": 176.66666666666666
+      },
+      "metrics": {
+        "setpointC": 176.667,
+        "reason": "Converged",
+        "kind": "Block",
+        "units": 5,
+        "discardedUnits": 1,
+        "meanC": 179.03750000000002,
+        "halfWidthC": 0.10524729710838869,
+        "stdDevC": 0.08477669696775006,
+        "driftCPerHour": 1.0347222222220012,
+        "swingC": 0.1619999999999891,
+        "minC": 178.81,
+        "maxC": 179.18,
+        "startC": 21.02,
+        "timeToSetpointMinutes": 29.066666666666666,
+        "settleMinutes": 43.5,
+        "measureMinutes": 15,
+        "totalMinutes": 58.5,
+        "precisionTargetC": 1.1111111111111112,
+        "longestGapSeconds": 1,
+        "offsetC": 2.370500000000021,
+        "metPrecision": true
+      },
+      "afterReset": false,
+      "startedWarm": false
+    }
+  ]
+}

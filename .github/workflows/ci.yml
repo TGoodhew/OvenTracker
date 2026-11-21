@@ -2,7 +2,8 @@ name: CI
 
 # Builds and tests on Windows and Linux for every push to main and every pull request, so a change that
 # works on one system and breaks the other is caught before it is merged. On Linux it also publishes the
-# app and runs a whole simulated session in a terminal, as a person would.
+# app and runs a whole simulated session in a terminal, as a person would. The Python port is tested on both
+# systems, and the C# and Python analyses must agree on every case in testdata/ (spec/testdata.md).
 
 on:
   push:
@@ -61,3 +62,71 @@ jobs:
           if (Select-String -Path run.log -Pattern "`e\[[0-9;?]*[A-Za-ln-z]" -CaseSensitive -Quiet) { throw "the log has cursor or screen control codes in it" }
           Get-Content run.log | Select-Object -Last 15
           Get-Content run/report.md -TotalCount 12
+
+  python:
+    name: Python port (${{ matrix.os }}, ${{ matrix.python }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ['3.11', '3.13']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install
+        run: python -m pip install ./python[test]
+
+      - name: Test (every testdata case, against the expected files)
+        run: python -m pytest python/tests -q
+
+  cross-check:
+    name: Cross-check C# and Python
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET (the SDK in global.json)
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install the Python package
+        run: python -m pip install ./python
+
+      - name: Both analyze every case, and the outputs must agree (spec/testdata.md)
+        shell: pwsh
+        run: ./testdata/cross-check.ps1
+
+  parity:
+    name: Parity reminder
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Warn when the analysis or formats change on one side only
+        shell: bash
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          changed=$(git diff --name-only "$BASE"...HEAD)
+          covered=$(echo "$changed" | grep -E '^src/OvenTracker/(Analysis/|Session/(Recording|Report)\.cs|Ovens/|Meter/Probes\.cs|Temperature\.cs|Commands/(AnalyzeCommand|SharedSettings)\.cs)' || true)
+          if [ -n "$covered" ] && ! echo "$changed" | grep -qE '^(python/|spec/|testdata/)'; then
+            echo "::warning title=Parity::This PR changes code the spec covers ($(echo $covered | tr '\n' ' ')) but not python/, spec/ or testdata/. If behaviour changed, update them, or open a follow-up issue labelled 'parity' (see the PR template)."
+          fi

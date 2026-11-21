@@ -102,9 +102,13 @@ public sealed class RunRecorder : IDisposable
 
     public void WriteResults(SessionInfo info, IReadOnlyList<PointResult> results, string markdown)
     {
-        File.WriteAllText(Path.Combine(Directory, "results.json"), JsonSerializer.Serialize(new { session = info, results }, Json.Options));
+        File.WriteAllText(Path.Combine(Directory, "results.json"), ResultsJson(info, results));
         File.WriteAllText(Path.Combine(Directory, "report.md"), markdown);
     }
+
+    /// <summary>results.json: the session and each setpoint's result (spec/results.schema.json).</summary>
+    public static string ResultsJson(SessionInfo info, IReadOnlyList<PointResult> results) =>
+        JsonSerializer.Serialize(new { session = info, results }, Json.Options);
 
     public void Dispose() => csv.Dispose();
 }

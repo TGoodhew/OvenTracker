@@ -6,3 +6,10 @@ TestResults/
 .vs/
 # Signing account details stay outside the repository.
 metadata.json
+# Python
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.venv/
+python/build/
+python/dist/

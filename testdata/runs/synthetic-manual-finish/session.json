@@ -1,0 +1,93 @@
+{
+  "appVersion": "1.0.0",
+  "started": "2026-11-20T15:58:56.8292661-08:00",
+  "meter": "OvenTracker simulated meter",
+  "location": "simulator",
+  "unit": "Celsius",
+  "toleranceC": 8,
+  "options": {
+    "precisionC": 1,
+    "minCycles": 4,
+    "minBlocks": 5,
+    "blockMinutes": 3,
+    "minHysteresisC": 1,
+    "smoothingSeconds": 5,
+    "maxPointMinutes": 180,
+    "noCycleMinutes": 15,
+    "flatWindowMinutes": 10,
+    "flatSlopeCPerMinute": 0.15,
+    "driftHorizonMinutes": 30,
+    "defaultCycleMinutes": 6
+  },
+  "plan": [
+    {
+      "index": 1,
+      "mode": "Bake",
+      "setpointC": 180
+    },
+    {
+      "index": 2,
+      "mode": "Bake",
+      "setpointC": 220
+    }
+  ],
+  "driver": "simulated",
+  "identity": {
+    "manufacturer": "OvenTracker",
+    "model": "simulated meter",
+    "serial": "SIM00001",
+    "firmware": "0.00"
+  },
+  "sensor": {
+    "name": "type K thermocouple",
+    "limitC": 2.2,
+    "limitFraction": 0.0075,
+    "limitsAdd": false,
+    "isGenericType": true
+  },
+  "adjustmentC": 0,
+  "adjust": {
+    "stepC": 0.5555555555555556,
+    "rangeC": 19.444444444444443,
+    "objective": "Balanced",
+    "model": "Shift",
+    "sharedAcrossModes": true
+  },
+  "ambientC": 21.9,
+  "sittings": [
+    "2026-11-20T15:58:56.8292661-08:00"
+  ],
+  "oven": {
+    "key": "ge-phs925",
+    "name": "GE Profile PHS925ST1SS",
+    "adjustStepC": 0.5555555555555556,
+    "adjustRangeC": 19.444444444444443,
+    "sharedAdjustment": true,
+    "howToRead": [
+      "Touch BROIL HI/LO and BAKE at the same time until the display shows SF.",
+      "Touch BAKE. The display shows the adjustment: positive is hotter, negative cooler.",
+      "Touch START to leave without changing it."
+    ],
+    "howToChange": [
+      "Touch BROIL HI/LO and BAKE at the same time until the display shows SF.",
+      "Touch BAKE. The display shows the adjustment set now.",
+      "Touch BAKE again to switch between positive (hotter) and negative (cooler).",
+      "Type the amount on the number pads, e.g. 1 then 0 for 10.",
+      "Check the display shows the right sign, then touch START."
+    ],
+    "convectionConversionC": 13.88888888888889,
+    "howToTurnOffConversion": [
+      "Touch BAKE and BROIL HI/LO at the same time until the display shows SF.",
+      "Touch CONVECTION COOK until the display shows CON OFF.",
+      "Touch START."
+    ],
+    "typicalCycleMinutes": 20,
+    "notes": [
+      "The adjustment affects baking and roasting, not broil or self-clean, and is kept through a power cut.",
+      "The manual doesn't say whether convection has an adjustment of its own; the app assumes it shares bake's."
+    ],
+    "source": "GE PHS925ST1SS owner's manual, pp. 15, 17 and 26; the display's sign confirmed on the oven, and its ~20-minute cycle measured, 2026-11-20.",
+    "isGeneric": false,
+    "defaultMaxMinutes": 180
+  }
+}

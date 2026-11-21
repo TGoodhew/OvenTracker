@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "spec/results.schema.json",
+  "title": "OvenTracker results.json",
+  "description": "A run's results, and analyze's results-reanalysed.json and results-combined.json: { session, results } (RunRecorder.ResultsJson in src/OvenTracker/Session/Recording.cs). Temperatures and differences are in °C. Properties whose value is null are left out, never written as null. See spec/recording.md.",
+  "type": "object",
+  "required": ["session", "results"],
+  "additionalProperties": false,
+  "properties": {
+    "session": { "$ref": "session.schema.json", "description": "The session as analysed." },
+    "results": { "type": "array", "items": { "$ref": "#/$defs/pointResult" } }
+  },
+  "$defs": {
+    "pointResult": {
+      "description": "One setpoint's result (PointResult).",
+      "type": "object",
+      "required": ["point", "metrics", "afterReset", "startedWarm"],
+      "additionalProperties": false,
+      "properties": {
+        "point": { "$ref": "session.schema.json#/$defs/testPoint" },
+        "metrics": { "$ref": "#/$defs/pointMetrics" },
+        "afterReset": { "type": "boolean", "description": "Measured after a break (a resumed sitting, or a wait for the oven to cool)." },
+        "startedWarm": { "type": "boolean", "description": "The run's first setpoint, started with the oven still warm." }
+      }
+    },
+    "pointMetrics": {
+      "description": "What was measured at a setpoint (PointMetrics in src/OvenTracker/Analysis/SetpointAnalyzer.cs). Minutes are from the setpoint's first reading.",
+      "type": "object",
+      "required": ["setpointC", "reason", "units", "discardedUnits", "totalMinutes", "precisionTargetC", "metPrecision"],
+      "additionalProperties": false,
+      "properties": {
+        "setpointC": { "type": "number", "description": "The setpoint the analysis used (°C)." },
+        "reason": { "enum": ["None", "Converged", "TimedOut", "Manual", "Aborted", "Skipped"] },
+        "kind": { "enum": ["Cycle", "Block"], "description": "Absent if measuring never began." },
+        "units": { "type": "integer", "minimum": 0 },
+        "discardedUnits": { "type": "integer", "minimum": 0 },
+        "meanC": { "type": "number" },
+        "halfWidthC": { "type": "number", "minimum": 0 },
+        "stdDevC": { "type": "number", "minimum": 0 },
+        "driftCPerHour": { "type": "number" },
+        "swingC": { "type": "number", "minimum": 0 },
+        "minC": { "type": "number" },
+        "maxC": { "type": "number" },
+        "cycleMinutes": { "type": "number", "minimum": 0 },
+        "startC": { "type": "number" },
+        "timeToSetpointMinutes": { "type": "number", "minimum": 0 },
+        "overshootC": { "type": "number" },
+        "settleMinutes": { "type": "number", "minimum": 0 },
+        "measureMinutes": { "type": "number", "minimum": 0 },
+        "totalMinutes": { "type": "number", "minimum": 0 },
+        "preheatSignalMinutes": { "type": "number", "minimum": 0 },
+        "preheatSignalC": { "type": "number" },
+        "precisionTargetC": { "type": "number" },
+        "longestGapSeconds": { "type": "number", "minimum": 0 },
+        "offsetC": { "type": "number", "description": "Computed: meanC − setpointC. Present when meanC is." },
+        "metPrecision": { "type": "boolean", "description": "Computed: halfWidthC is present and ≤ precisionTargetC + 1e-9." }
+      },
+      "dependentRequired": {
+        "meanC": ["offsetC", "stdDevC", "swingC", "minC", "maxC", "settleMinutes", "measureMinutes", "kind"],
+        "offsetC": ["meanC"],
+        "halfWidthC": ["meanC"],
+        "driftCPerHour": ["halfWidthC"],
+        "cycleMinutes": ["meanC"],
+        "preheatSignalMinutes": ["preheatSignalC"],
+        "preheatSignalC": ["preheatSignalMinutes"]
+      },
+      "if": { "properties": { "metPrecision": { "const": true } } },
+      "then": { "required": ["halfWidthC"] }
+    }
+  }
+}

@@ -12,6 +12,7 @@ Release:
 | `OvenTracker-<version>-linux-x64-self-contained.tar.gz` | Linux on a PC, nothing else needed |
 | `OvenTracker-<version>-linux-arm64.tar.gz` | Linux on 64-bit ARM (e.g. a Raspberry Pi 4 or 5), with the .NET 11 runtime |
 | `OvenTracker-<version>-linux-arm64-self-contained.tar.gz` | Linux on 64-bit ARM, nothing else needed |
+| `oventracker-<version>-py3-none-any.whl`, `oventracker-<version>.tar.gz` | The Python package (the analysis), for `pip install`. Also published to PyPI once that's set up (below). |
 
 The Windows programs (`OvenTracker.exe`, `OvenTracker.dll`) are signed with Azure Artifact Signing. A
 release is never made with unsigned Windows programs: if signing isn't set up, the Windows job fails and
@@ -19,7 +20,9 @@ nothing is published.
 
 ## Making a release
 
-1. Set the version in `src/OvenTracker/OvenTracker.csproj` (`<Version>`), and merge to `main`.
+1. Set the version in `src/OvenTracker/OvenTracker.csproj` (`<Version>`) and in `python/pyproject.toml`
+   (`version`). Move `CHANGELOG.md`'s Unreleased entries under it, and merge to `main`. The workflow stamps
+   the tag's version into both anyway, so the release can't ship two versions.
 2. Tag the commit and push the tag:
 
    ```sh
@@ -32,6 +35,22 @@ nothing is published.
 
 The workflow stamps the tag's version into the programs (`OvenTracker --version` reports it) and names the
 packages after it.
+
+## Publishing the Python package to PyPI (once)
+
+The Python package is always built, tested and attached to the GitHub Release. Publishing it to PyPI as well
+uses PyPI's **trusted publishing**: PyPI trusts this repository's release workflow, so no token is stored
+anywhere.
+
+1. On pypi.org, under *Your projects → Publishing*, add a pending trusted publisher:
+   - project `oventracker`;
+   - owner `TGoodhew`, repository `OvenTracker`;
+   - workflow `release.yml`, environment `pypi`.
+2. In the repository's settings, create the environment `pypi`. A required reviewer is a good idea.
+3. Set the repository variable `PYPI_PUBLISH` to `true`.
+
+Until then, the PyPI job is skipped and the release is otherwise complete. If the name `oventracker` is taken
+on PyPI, change `name` in `python/pyproject.toml` and the pending publisher to match.
 
 ## Setting up signing (once)
 
