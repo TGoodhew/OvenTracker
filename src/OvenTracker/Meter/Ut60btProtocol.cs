@@ -45,12 +45,18 @@ public sealed class Ut60btFrame
     public bool PeakMax => (b[16] & 0x04) != 0;
     public bool PeakMin => (b[16] & 0x02) != 0;
 
+    /// <summary>
+    /// The display without its spaces (and any NUL padding), as dmmpy and unit_ut61eplus read it: the sign has a
+    /// column of its own, so "-  12" is -12.
+    /// </summary>
+    public string Text => new(Display.Where(c => c is not (' ' or '\0')).ToArray());
+
     /// <summary>"OL" on the display (with or without a dot or sign): for temperature, no thermocouple, or out of range.</summary>
-    public bool Overload => Display.Replace(".", "").Trim() is "OL" or "-OL";
+    public bool Overload => Text.Replace(".", "") is "OL" or "-OL";
 
     /// <summary>The number on the display, or null when it isn't one (an overload, or something the app can't read).</summary>
     public double? Value =>
-        !Overload && double.TryParse(Display.Trim(), NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var v)
+        !Overload && double.TryParse(Text, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var v)
             ? v : null;
 
     public override string ToString() => Convert.ToHexString(b);
@@ -146,7 +152,7 @@ public static class Ut60btProtocol
         return new(time, ReadingStatus.Ok, Math.Round(c, 4), raw);
     }
 
-    public static string Describe(Ut60btFrame f) => $"{ModeName(f.Mode)} {f.Display.Trim()}";
+    public static string Describe(Ut60btFrame f) => $"{ModeName(f.Mode)} {f.Text}";
 }
 
 /// <summary>

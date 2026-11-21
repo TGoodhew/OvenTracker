@@ -99,6 +99,13 @@ public class Ut60btTests
     public void AnOpenThermocoupleIsAnOverload(string display) =>
         Assert.Equal(ReadingStatus.Overload, Ut60btProtocol.ToReading(DateTimeOffset.UnixEpoch, new Ut60btFrame(Frame(10, display))).Status);
 
+    [Theory]
+    [InlineData("-  12", -12.0)]   // the sign in a column of its own
+    [InlineData("23\0\0\0", 23.0)] // NUL padding
+    [InlineData("- 1.5", -1.5)]
+    public void ReadsTheDisplayWithoutItsSpaces(string display, double expected) =>
+        Assert.Equal(expected, Ut60btProtocol.ToReading(DateTimeOffset.UnixEpoch, new Ut60btFrame(Frame(10, display))).Celsius!.Value, 6);
+
     [Fact]
     public void ADisplayThatIsntANumberIsAnError() =>
         Assert.Equal(ReadingStatus.Error, Ut60btProtocol.ToReading(DateTimeOffset.UnixEpoch, new Ut60btFrame(Frame(10, "----"))).Status);
@@ -158,7 +165,7 @@ public class Ut60btTests
         public Func<byte[]> Next { get; set; } = () => Frame(10, "180");
         public List<byte[]> Writes { get; } = [];
         public string Address => "C4:BE:84:12:34:56";
-        public void Open(Action<byte[]> r) { received = r; Opened = true; }
+        public void Open(Action<byte[]> r) { received = r; Opened = true; Streaming = false; } // a fresh connection: not streaming yet
 
         public void Write(byte[] data)
         {
@@ -220,6 +227,28 @@ public class Ut60btTests
         Assert.Equal(3, writes.Count(w => w.SequenceEqual(Ut60btProtocol.GetName)));
         Assert.Single(writes, w => w.SequenceEqual(Ut60btProtocol.GetData));
         Assert.True(writes.Count(w => w.SequenceEqual(Ut60btProtocol.Trigger)) >= 3);
+    }
+
+    [Fact]
+    public void ReconnectingStartsCleanAndAsksForTheNameAgain()
+    {
+        // As after a battery swap: the meter is switched off and on, and the poller calls Connect again.
+        var link = new FakeMeterLink { Next = () => Frame(10, "180", f15: 0x32) }; // low battery
+        using var meter = new Ut60btMeter(link) { Timeout = TimeSpan.FromSeconds(2), PollEvery = TimeSpan.FromMilliseconds(300) };
+        meter.Connect();
+        Assert.True(meter.ReadLowBattery());
+        Assert.Equal(180.0, meter.Read().Celsius!.Value, 6);
+
+        link.Next = () => Frame(10, "181"); // a fresh battery
+        int before;
+        lock (link.Writes) before = link.Writes.Count;
+        meter.Connect();
+        List<byte[]> after;
+        lock (link.Writes) after = link.Writes.Skip(before).ToList();
+        Assert.Equal(Ut60btProtocol.GetName, after[0]);
+        Assert.Equal(Ut60btProtocol.GetData, after[1]);
+        Assert.False(meter.ReadLowBattery()); // not the frame from before
+        Assert.Equal(181.0, meter.Read().Celsius!.Value, 6);
     }
 
     [Fact]

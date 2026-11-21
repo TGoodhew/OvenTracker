@@ -15,7 +15,7 @@ from datetime import datetime, timedelta, timezone
 from . import ble
 from . import ut60bt_protocol as protocol
 from .auto_power_off import AutoPowerOff
-from .base import MeterConfig, MeterException, MeterIdentity, MeterReading, TemperatureMeter
+from .base import MeterConfig, MeterIdentity, MeterReading, TemperatureMeter
 from .driver import MeterCandidate, MeterDriver, MeterRequest, ProbeResult
 from .resource_spec import ResourceSpec, Transport, describe
 from .ut60bt_protocol import Ut60btAssembler, Ut60btFrame
@@ -81,7 +81,15 @@ class Ut60btMeter(TemperatureMeter):
 
     def connect(self) -> MeterIdentity:
         self.disconnect()
+        # Start clean: after a reconnect (the meter switched off and on, say) nothing from before counts. The meter
+        # must be asked its name again, and a frame from before mustn't pass for one from now, or give its battery.
         with self._gate:
+            self._assembler = Ut60btAssembler()
+            self._latest = None
+            self._latest_mono = 0.0
+            self._received = 0
+            self._returned = 0
+            self._name = None
             self._request = 0
             self._last_poll = None
             self._received_at_poll = -1
@@ -119,8 +127,8 @@ class Ut60btMeter(TemperatureMeter):
         """Sends a command, ignoring a failure: an unanswered request is retried, and a link that's gone shows as no data."""
         try:
             self._link.write(command)
-        except (MeterException, NotImplementedError, OSError, RuntimeError, TimeoutError):
-            pass
+        except Exception:
+            pass  # whatever the link raises, it shows as no data
 
     def _poll_if_quiet(self) -> None:
         """Asks for data, if no frame has come for a while and the last request has had its chance."""

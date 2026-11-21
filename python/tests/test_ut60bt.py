@@ -100,6 +100,15 @@ def test_an_open_thermocouple_is_an_overload(display):
     assert protocol.to_reading(EPOCH, Ut60btFrame(frame(10, display))).status == ReadingStatus.Overload
 
 
+@pytest.mark.parametrize(
+    "display, expected",
+    [("-  12", -12.0), ("23\x00\x00\x00", 23.0), ("- 1.5", -1.5)],
+    ids=["sign in its own column", "NUL padding", "sign and point"],
+)
+def test_reads_the_display_without_its_spaces(display, expected):
+    assert protocol.to_reading(EPOCH, Ut60btFrame(frame(10, display))).celsius == pytest.approx(expected)
+
+
 def test_a_display_that_isnt_a_number_is_an_error():
     assert protocol.to_reading(EPOCH, Ut60btFrame(frame(10, "----"))).status == ReadingStatus.Error
 
@@ -158,6 +167,7 @@ class FakeMeterLink(ble.BleLink):
     def open(self, received):
         self._received = received
         self.opened = True
+        self.streaming = False  # a fresh connection: not streaming yet
 
     def write(self, data: bytes) -> None:
         with self._lock:
@@ -225,6 +235,25 @@ def test_a_meter_that_answers_only_the_other_request_is_polled_with_it():
     meter.dispose()
 
 
+def test_reconnecting_starts_clean_and_asks_for_the_name_again():
+    # As after a battery swap: the meter is switched off and on, and the poller calls connect again.
+    link = FakeMeterLink()
+    link.next = lambda: frame(10, "180", f15=0x32)  # low battery
+    meter = Ut60btMeter(link, timeout=2, poll_every=0.3)
+    meter.connect()
+    assert meter.read_low_battery() is True
+    assert meter.read().celsius == pytest.approx(180.0)
+
+    link.next = lambda: frame(10, "181")  # a fresh battery
+    before = len(link.written())
+    meter.connect()
+    after = link.written()[before:]
+    assert after[:2] == [protocol.GET_NAME, protocol.GET_DATA]
+    assert meter.read_low_battery() is False  # not the frame from before
+    assert meter.read().celsius == pytest.approx(181.0)
+    meter.dispose()
+
+
 def test_the_meter_times_out_when_nothing_answers():
     meter = Ut60btMeter(FakeMeterLink(answers_name=False, data_command=None), timeout=0.3, poll_every=0.05, name_wait=0.01)
     with pytest.raises(TimeoutError):
@@ -244,13 +273,23 @@ def test_its_driver_is_known_with_its_auto_power_off_and_battery():
     assert driver.discover() == []
 
 
+class FakeServices:
+    def __init__(self, uuids: set[str]):
+        self.uuids = uuids
+
+    def get_characteristic(self, specifier):
+        return object() if specifier in self.uuids else None
+
+
 class FakeBleakClient:
     instances: list["FakeBleakClient"] = []
+    characteristics: set[str] = {protocol.NOTIFY, protocol.WRITE}
 
     def __init__(self, address, timeout=30, **kwargs):
         self.address = address
         self.calls: list[str] = []
         self.written: list[tuple[str, bytes, bool]] = []
+        self.services = FakeServices(FakeBleakClient.characteristics)
         FakeBleakClient.instances.append(self)
 
     async def connect(self, **kwargs):
@@ -292,3 +331,13 @@ def test_the_bleak_link_writes_commands_to_the_write_characteristic(monkeypatch)
     with pytest.raises(MeterException):
         other.write(protocol.GET_NAME)
     other.dispose()
+
+    # A device without the command characteristic fails when it's opened, and is let go.
+    FakeBleakClient.characteristics = {protocol.NOTIFY}
+    try:
+        missing = ble.link_for("C4:BE:84:12:34:56", protocol.SERVICE, protocol.NOTIFY, protocol.WRITE)
+        with pytest.raises(MeterException, match="command characteristic"):
+            missing.open(lambda _: None)
+        assert FakeBleakClient.instances[-1].calls == ["connect", "disconnect"]
+    finally:
+        FakeBleakClient.characteristics = {protocol.NOTIFY, protocol.WRITE}

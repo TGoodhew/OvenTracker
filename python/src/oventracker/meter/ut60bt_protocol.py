@@ -150,16 +150,22 @@ class Ut60btFrame:
         return (self._b[16] & 0x02) != 0
 
     @property
+    def text(self) -> str:
+        """The display without its spaces (and any NUL padding), as dmmpy and unit_ut61eplus read it: the sign has a
+        column of its own, so "-  12" is -12."""
+        return "".join(c for c in self.display if c not in (" ", "\x00"))
+
+    @property
     def overload(self) -> bool:
         """"OL" on the display (with or without a dot or sign): for temperature, no thermocouple, or out of range."""
-        return self.display.replace(".", "").strip() in ("OL", "-OL")
+        return self.text.replace(".", "") in ("OL", "-OL")
 
     @property
     def value(self) -> float | None:
         """The number on the display, or None when it isn't one (an overload, or something the app can't read)."""
         if self.overload:
             return None
-        text = self.display.strip()
+        text = self.text
         # As .NET's AllowLeadingSign | AllowDecimalPoint: digits with at most one point, and a sign in front.
         body = text[1:] if text[:1] in ("-", "+") else text
         if not body or body.count(".") > 1 or not body.replace(".", "").isdigit() or not body.replace(".", "").isascii():
@@ -205,7 +211,7 @@ def to_reading(time: datetime, f: Ut60btFrame) -> MeterReading:
 
 
 def describe(f: Ut60btFrame) -> str:
-    return f"{mode_name(f.mode)} {f.display.strip()}"
+    return f"{mode_name(f.mode)} {f.text}"
 
 
 class Ut60btAssembler:

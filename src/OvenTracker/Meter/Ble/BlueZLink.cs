@@ -139,8 +139,9 @@ public sealed class BlueZLink(string address, Guid service, Guid characteristic,
     }
 
     /// <summary>
-    /// Writes to the command characteristic: <c>GattCharacteristic1.WriteValue(ay value, a{sv} options)</c>, with no
-    /// options, so BlueZ chooses a write with or without a response from what the characteristic allows.
+    /// Writes to the command characteristic: <c>GattCharacteristic1.WriteValue(ay value, a{sv} options)</c>, with
+    /// <c>type=command</c>, a write without a response, as on Windows and in bleak (BlueZ would otherwise wait for a
+    /// response whenever the characteristic allows one).
     /// </summary>
     public void Write(byte[] data)
     {
@@ -150,7 +151,11 @@ public sealed class BlueZLink(string address, Guid service, Guid characteristic,
         {
             w.WriteMethodCallHeader(Bluez, writePath, CharacteristicInterface, "WriteValue", "aya{sv}");
             w.WriteArray(data);
-            w.WriteDictionaryEnd(w.WriteDictionaryStart());
+            var options = w.WriteDictionaryStart();
+            w.WriteDictionaryEntryStart();
+            w.WriteString("type");
+            w.WriteVariantString("command");
+            w.WriteDictionaryEnd(options);
             msg = w.CreateMessage();
         }
         try { c.CallMethodAsync(msg).GetAwaiter().GetResult(); }

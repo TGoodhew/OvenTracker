@@ -242,6 +242,10 @@ class BleakLink(BleLink):
             client = bleak.BleakClient(self._address, timeout=self.connect_timeout)
             await client.connect()
             try:
+                # As the C# app does: a missing command characteristic fails here, not as unanswered requests later.
+                services = getattr(client, "services", None)
+                if self.write_characteristic is not None and services is not None and services.get_characteristic(self.write_characteristic) is None:
+                    raise MeterException(f"{self._address} connected, but doesn't offer the meter's GATT command characteristic.")
                 await client.start_notify(self.characteristic, on_value)
             except BaseException:
                 try:

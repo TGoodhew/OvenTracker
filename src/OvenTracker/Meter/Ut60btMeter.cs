@@ -20,7 +20,7 @@ namespace OvenTracker.Meter;
 public sealed class Ut60btMeter(IBleLink link) : ITemperatureMeter
 {
     readonly object gate = new();
-    readonly Ut60btAssembler assembler = new();
+    Ut60btAssembler assembler = new();
     readonly byte[][] requests = [Ut60btProtocol.GetData, Ut60btProtocol.Trigger];
     Ut60btFrame? latest;
     DateTimeOffset latestTime;
@@ -53,8 +53,14 @@ public sealed class Ut60btMeter(IBleLink link) : ITemperatureMeter
     public MeterIdentity Connect()
     {
         Disconnect();
+        // Start clean: after a reconnect (the meter switched off and on, say) nothing from before counts. The meter
+        // must be asked its name again, and a frame from before mustn't pass for one from now, or give its battery.
         lock (gate)
         {
+            assembler = new Ut60btAssembler();
+            latest = null;
+            received = returned = 0;
+            name = null;
             request = 0;
             lastPoll = DateTime.MinValue;
             receivedAtPoll = -1;
@@ -73,7 +79,12 @@ public sealed class Ut60btMeter(IBleLink link) : ITemperatureMeter
             lock (gate)
             {
                 var until = DateTime.UtcNow + NameWait;
-                while (name is null && DateTime.UtcNow < until) Monitor.Wait(gate, until - DateTime.UtcNow);
+                while (name is null)
+                {
+                    var left = until - DateTime.UtcNow; // once: a second reading could make it negative, which Monitor.Wait won't take
+                    if (left <= TimeSpan.Zero) break;
+                    Monitor.Wait(gate, left);
+                }
             }
         }
 
@@ -103,7 +114,7 @@ public sealed class Ut60btMeter(IBleLink link) : ITemperatureMeter
     void Send(byte[] command)
     {
         try { link.Write(command); }
-        catch (Exception ex) when (ex is MeterException or NotSupportedException or IOException or InvalidOperationException) { }
+        catch (Exception) { } // whatever the link throws (a D-Bus connection closed, say), it shows as no data
     }
 
     /// <summary>Asks for data, if no frame has come for a while and the last request has had its chance.</summary>
