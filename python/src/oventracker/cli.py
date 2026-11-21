@@ -92,6 +92,7 @@ RUN = SHARED + [
     Opt("--remind", "MINUTES", "float", "remind", "While waiting for the oven to be changed (or turned off), beep again every this many minutes. 0 for no repeats.", "1"),
     Opt("--sim-forget", "N", "int", "sim_forget", "With --simulate, leave the simulated oven at its old setting for setpoint N, as if you'd forgotten to change it.", hidden=True),
     Opt("--sim-apo", "MINUTES", "float", "sim_apo", "With --simulate, give the simulated meter an auto power-off after this many minutes (it wakes 2 minutes later).", hidden=True),
+    Opt("--sim-battery", "MINUTES", "float", "sim_battery", "With --simulate, make the simulated meter's battery run down over this many minutes, its readings going wrong near the end; the app pauses for a swap.", hidden=True),
     Opt("-y|--yes", None, "flag", "yes", "Don't ask: start at once and begin each setpoint straight away (mainly for --simulate)."),
 ]
 

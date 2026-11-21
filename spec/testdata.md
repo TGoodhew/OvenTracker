@@ -31,6 +31,7 @@ testdata/
 | `synthetic-no-cycle` | Made by `tools/make_synthetic.py`: heats and then holds steady with no visible cycle, and ends with no end event. |
 | `synthetic-manual-finish` | `sim-bake-c` cut 60 % of the way through its first setpoint, finished by hand (`end:Manual`). |
 | `real-2026-11-21-preheat` | A real GE PHS925 heating from cold to 350 °F in steps, with dips of up to 8 °C, until it was restarted (R) at 896 s: the steps mustn't count as reaching the setting or as cycles (#49). The meter's serial number is replaced. |
+| `sim-battery-swap` | The simulator, °F, bake at 350 °F, with a battery that runs low partway through: the app paused for a swap and carried on with the same setpoint. The paused readings are point-0 rows, leaving a gap of about three minutes (#51). |
 | `py-sim-bake-convection-f` | Recorded by the **Python** app's simulator, °F, bake and convection, so the C# app is checked on the Python app's recordings too. |
 
 The cases replay each run alone. Some also change options:

@@ -4,20 +4,20 @@ Run 2026-11-20 11:18 with Agilent Technologies U1253B on COM5. A setpoint is acc
 
 ## Findings
 
-- Bake: runs 16.9 °F hot on average over 1 setpoint (worst 16.9 °F). The thermostat swings 18.2 °F peak to peak, one cycle every 20.0 min.
-- Bake: change the oven's thermostat adjustment by −17 °F, from whatever it is set to now. Details are under Best adjustment.
+- Bake: runs 15.1 °F hot on average over 1 setpoint (worst 15.1 °F). The thermostat swings 19.1 °F peak to peak, one cycle every 16.6 min.
+- Bake: change the oven's thermostat adjustment by −15 °F, from whatever it is set to now. Details are under Best adjustment.
 
 ## Each setpoint
 
 | Mode | Set | Measured | Offset | ±95 % | Verdict | Swing | Range | Cycle | To temp | First peak | Time | Used |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Bake | 350 °F | 366.9 °F | +16.9 °F | 22.4 °F | Borderline | 18.2 °F | 355–374 | 20.0 min | 9 min | — | 61 min | 2 cycles |
+| Bake | 350 °F | 365.1 °F | +15.1 °F | — | Out of tolerance | 19.1 °F | 355–374 | 16.6 min | 9 min | — | 61 min | 1 cycles |
 
 *Measured* is the time-weighted mean over whole thermostat cycles once the oven had settled; *±95 %* is how sure that mean is. *Swing* is the average peak-to-peak of a cycle and *Range* the lowest and highest readings while measuring. *To temp* is from pressing Start to first reaching the setting (or the thermostat first turning round, for an oven that runs cold); *First peak* is the first high point against the setting, which is the overshoot when it is positive.
 
 ## Best adjustment
 
-**Bake: change the oven's thermostat adjustment by −17 °F, from whatever it is set to now.**
+**Bake: change the oven's thermostat adjustment by −15 °F, from whatever it is set to now.**
 
 - This makes the overall error across the setpoints measured as small as it can.
 - Afterwards every setpoint measured should be within 0.1 °F of its setting, which is about the probe's own accuracy.
@@ -27,7 +27,7 @@ Run 2026-11-20 11:18 with Agilent Technologies U1253B on COM5. A setpoint is acc
 
 | Mode | Set | Now | After adjusting | ±95 % | Within tolerance? |
 | --- | --- | --- | --- | --- | --- |
-| Bake | 350 °F | +16.9 °F | −0.1 °F | 22.4 °F | Borderline |
+| Bake | 350 °F | +15.1 °F | +0.1 °F | — | Borderline |
 
 [Reading the results and adjusting the oven](https://github.com/TGoodhew/OvenTracker/blob/main/docs/adjusting-the-oven.md) explains how to enter the adjustment.
 

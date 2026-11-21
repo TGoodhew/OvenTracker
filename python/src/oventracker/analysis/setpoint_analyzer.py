@@ -215,11 +215,22 @@ def _sign(x: float) -> int:
 
 
 class SetpointAnalyzer:
+    #: A gap in the readings longer than this (the meter off for a battery swap, or its auto power-off) breaks the
+    #: cycle in progress: the readings either side aren't joined up. Two minutes: longer than a Bluetooth link takes
+    #: to come back (dropouts of up to 90 s are common), shorter than a battery swap or an auto power-off.
+    GAP_SECONDS = 120.0
+
     def __init__(self, setpoint_c: float, options: AnalysisOptions | None = None):
         self.setpoint_c = setpoint_c
         self.options = options if options is not None else AnalysisOptions()
         self.series = SampleSeries()
         self._detector = TurningPointDetector()
+        #: The time spent in such gaps, which doesn't count towards the time limit.
+        self._gap_seconds = 0.0
+        #: When the readings last came back after a gap.
+        self._resumed_at: float | None = None
+        #: A gap broke the cycle in progress: the next trough starts a new one, closing none.
+        self._awaiting_trough = False
         self.turning_points: list[TurningPoint] = []
         self.units: list[MeasurementUnit] = []
         self._cycle_durations: list[float] = []
@@ -284,10 +295,13 @@ class SetpointAnalyzer:
         o = self.options
         if self.phase == PointPhase.Complete:
             return
+        previous_t = self.series.last.t if self.series.count > 0 else None
         if not self.series.add(Sample(t, c)):
             return
         if self.start_c is None:
             self.start_c = c
+        if previous_t is not None and t - previous_t > self.GAP_SECONDS:
+            self._on_gap(previous_t, t)
 
         self._smooth_window.append(Sample(t, c))
         self._smooth_sum += c
@@ -329,7 +343,7 @@ class SetpointAnalyzer:
             self._last_flat_check = t
             self._check_for_no_cycling(t)
 
-        if self.phase != PointPhase.Complete and t >= o.max_point_minutes * 60:
+        if self.phase != PointPhase.Complete and t - self._gap_seconds >= o.max_point_minutes * 60:
             self._complete(CompletionReason.TimedOut)
 
     def _on_turning_point(self, tp: TurningPoint) -> None:
@@ -356,7 +370,11 @@ class SetpointAnalyzer:
 
         if self.phase == PointPhase.Measuring:
             # A trough too soon after the last is a disturbance, not a cycle: the cycle carries on to the next one.
-            if self._close_unit(UnitKind.Cycle, self._unit_start, tp.t):
+            if self._awaiting_trough:
+                # The first trough after a gap: the cycle the gap broke is dropped, and a new one starts here.
+                self._unit_start = tp.t
+                self._awaiting_trough = False
+            elif self._close_unit(UnitKind.Cycle, self._unit_start, tp.t):
                 self._unit_start = tp.t
         elif self.phase == PointPhase.Settling and len(self.turning_points) >= 2:
             self.phase = PointPhase.Measuring
@@ -378,7 +396,25 @@ class SetpointAnalyzer:
         self._overshoot_c = None
         self.measuring_start = None
         self.kind = None
+        self._awaiting_trough = False
         self.phase = PointPhase.Heating
+
+    def _on_gap(self, before: float, to: float) -> None:
+        """The readings came back after a gap (SetpointAnalyzer.OnGap): start the smoothing and the turning points
+        afresh (nothing is drawn across the hole), drop the cycle in progress (measuring carries on from the next
+        trough), restart a block in progress, and keep the gap out of the time limit and of the no-cycle rule's
+        quiet time."""
+        self._gap_seconds += to - before
+        self._resumed_at = to
+        self._smooth_window.clear()
+        self._smooth_sum = 0.0
+        self._detector = TurningPointDetector()
+        if self.phase != PointPhase.Measuring:
+            return
+        if self.kind == UnitKind.Block:
+            self._unit_start = to
+        else:
+            self._awaiting_trough = True
 
     def _check_for_no_cycling(self, t: float) -> None:
         o = self.options
@@ -387,6 +423,7 @@ class SetpointAnalyzer:
             self.turning_points[-1].confirmed_at if self.turning_points else 0.0,
             self._approach_turns[-1].confirmed_at if self._approach_turns else 0.0,
         )
+        last_turn = max(last_turn, self._resumed_at if self._resumed_at is not None else 0.0)  # a gap isn't the oven being still
         quiet_for = t - last_turn
         no_cycle = o.no_cycle_minutes * 60
 
@@ -513,12 +550,12 @@ class SetpointAnalyzer:
         if self.phase == PointPhase.Complete:
             return Eta(0.0, False)
         now = self.now
-        cap = max(0.0, o.max_point_minutes * 60 - now)
+        cap = max(0.0, o.max_point_minutes * 60 - (now - self._gap_seconds))
         known = self.expected_unit_seconds()
         unit = known if known is not None else o.default_cycle_minutes * 60
         required = self.required_units
         if self.phase == PointPhase.Measuring:
-            into = now - self._unit_start
+            into = 0.0 if self._awaiting_trough else now - self._unit_start
             n = len(self.units)
             seconds = (required - n) * unit - into if required > n else unit - into
             seconds = max(seconds, 0.0)

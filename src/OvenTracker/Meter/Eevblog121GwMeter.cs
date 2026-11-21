@@ -114,5 +114,10 @@ public sealed class Eevblog121GwMeter(IBleLink link) : ITemperatureMeter
         get { lock (gate) return latest?.LowBattery == true; }
     }
 
+    public bool? ReadLowBattery()
+    {
+        lock (gate) return latest?.LowBattery;
+    }
+
     public void Dispose() => Disconnect();
 }

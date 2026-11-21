@@ -291,6 +291,7 @@ def test_a_meter_with_only_the_required_members_measures_a_setpoint():
     meter.beep()  # does nothing, and doesn't throw
     poller = MeterPoller(meter, 1, speed=20_000, connected=False)
     poller.battery_every = 1
+    poller.min_simulated_period = 0  # as fast as it goes: no tracker here to keep pace with
     poller.enqueue(lambda m: m.beep())
     poller.start()
     a = SetpointAnalyzer(180)

@@ -114,7 +114,23 @@ public sealed class SetpointAnalyzer
 {
     readonly AnalysisOptions o;
     readonly SampleSeries series = new();
-    readonly TurningPointDetector detector = new();
+    TurningPointDetector detector = new();
+
+    /// <summary>
+    /// A gap in the readings longer than this (the meter off for a battery swap, or its auto power-off) breaks the cycle
+    /// in progress: the readings either side aren't joined up. Two minutes: longer than a Bluetooth link takes to come
+    /// back (dropouts of up to 90 s are common), shorter than a battery swap or an auto power-off.
+    /// </summary>
+    public const double GapSeconds = 120;
+
+    /// <summary>The time spent in such gaps, which doesn't count towards the time limit.</summary>
+    double gapSeconds;
+
+    /// <summary>When the readings last came back after a gap.</summary>
+    double? resumedAt;
+
+    /// <summary>A gap broke the cycle in progress: the next trough starts a new one, closing none.</summary>
+    bool awaitingTrough;
     readonly List<TurningPoint> turningPoints = [];
     readonly List<MeasurementUnit> units = [];
     readonly List<double> cycleDurations = [];
@@ -178,8 +194,10 @@ public sealed class SetpointAnalyzer
     public void Add(double t, double c)
     {
         if (Phase == PointPhase.Complete) return;
+        var previousT = series.Count > 0 ? series.Last.T : (double?)null;
         if (!series.Add(new Sample(t, c))) return;
         StartC ??= c;
+        if (previousT is { } before && t - before > GapSeconds) OnGap(before, t);
 
         smoothWindow.Enqueue(new Sample(t, c));
         smoothSum += c;
@@ -218,7 +236,7 @@ public sealed class SetpointAnalyzer
             CheckForNoCycling(t);
         }
 
-        if (Phase != PointPhase.Complete && t >= o.MaxPointMinutes * 60)
+        if (Phase != PointPhase.Complete && t - gapSeconds >= o.MaxPointMinutes * 60)
             Complete(CompletionReason.TimedOut);
     }
 
@@ -247,7 +265,13 @@ public sealed class SetpointAnalyzer
         if (Phase == PointPhase.Measuring)
         {
             // A trough too soon after the last is a disturbance, not a cycle: the cycle carries on to the next one.
-            if (CloseUnit(UnitKind.Cycle, unitStart, tp.T)) unitStart = tp.T;
+            if (awaitingTrough)
+            {
+                // The first trough after a gap: the cycle the gap broke is dropped, and a new one starts here.
+                unitStart = tp.T;
+                awaitingTrough = false;
+            }
+            else if (CloseUnit(UnitKind.Cycle, unitStart, tp.T)) unitStart = tp.T;
         }
         else if (Phase == PointPhase.Settling && turningPoints.Count >= 2)
         {
@@ -272,13 +296,32 @@ public sealed class SetpointAnalyzer
         overshootC = null;
         measuringStart = null;
         Kind = null;
+        awaitingTrough = false;
         Phase = PointPhase.Heating;
+    }
+
+    /// <summary>
+    /// The readings came back after a gap: start the smoothing and the turning points afresh (nothing is drawn across
+    /// the hole), drop the cycle in progress (measuring carries on from the next trough), restart a block in progress,
+    /// and keep the gap out of the time limit and of the no-cycle rule's quiet time.
+    /// </summary>
+    void OnGap(double from, double to)
+    {
+        gapSeconds += to - from;
+        resumedAt = to;
+        smoothWindow.Clear();
+        smoothSum = 0;
+        detector = new TurningPointDetector();
+        if (Phase != PointPhase.Measuring) return;
+        if (Kind == UnitKind.Block) unitStart = to;
+        else awaitingTrough = true;
     }
 
     void CheckForNoCycling(double t)
     {
         // Any turn counts as the oven not being still, those set aside on the way there too.
         var lastTurn = Math.Max(turningPoints.Count > 0 ? turningPoints[^1].ConfirmedAt : 0, approachTurns.Count > 0 ? approachTurns[^1].ConfirmedAt : 0);
+        lastTurn = Math.Max(lastTurn, resumedAt ?? 0); // a gap isn't the oven being still
         var quietFor = t - lastTurn;
         var noCycle = o.NoCycleMinutes * 60;
 
@@ -411,7 +454,7 @@ public sealed class SetpointAnalyzer
     {
         if (Phase == PointPhase.Complete) return new Eta(0, false);
         var now = Now;
-        var cap = Math.Max(0, o.MaxPointMinutes * 60 - now);
+        var cap = Math.Max(0, o.MaxPointMinutes * 60 - (now - gapSeconds));
         var known = ExpectedUnitSeconds();
         var unit = known ?? o.DefaultCycleMinutes * 60;
         var required = RequiredUnits;
@@ -421,7 +464,7 @@ public sealed class SetpointAnalyzer
         switch (Phase)
         {
             case PointPhase.Measuring:
-                var into = now - unitStart;
+                var into = awaitingTrough ? 0 : now - unitStart;
                 seconds = required > units.Count ? (required - units.Count) * unit - into : unit - into;
                 seconds = Math.Max(seconds, 0);
                 rough = units.Count < 2;

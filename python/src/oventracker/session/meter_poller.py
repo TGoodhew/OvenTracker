@@ -45,6 +45,15 @@ class _Readings:
             yield r
 
 
+#: The shortest time between two readings of the simulator, in real seconds. The C# poller waits in whole
+#: milliseconds on the system timer, so at a large speed-up (--speed 3000) it reads a few hundred times a second:
+#: some 20 readings for each pass of the tracker (one each 100 ms). Python's finer sleep would read ten times as
+#: many. The tracker looks at the battery and the meter's silence once a pass, after the readings, so that many
+#: in one pass would let the simulated battery go from low to giving false readings before the app noticed it
+#: was low, and run a pause's end into the meter coming back (#51).
+MIN_SIMULATED_PERIOD = 0.004
+
+
 class MeterPoller:
     def __init__(self, meter: TemperatureMeter, interval_seconds: float, speed: float = 1, connected: bool = False):
         """``speed``: real-time speed-up, for the simulator only."""
@@ -73,8 +82,29 @@ class MeterPoller:
         self.read_count = 0
         #: How long (in the meter's time) it can be quiet, with the link up, before the poller tries reconnecting.
         self.quiet_reconnect_after = 120.0
-        #: Battery is checked every this many readings.
-        self.battery_every = 300
+        #: Battery is checked every this many readings (each minute at the usual interval), and on (re)connecting.
+        self.battery_every = 60
+        #: MIN_SIMULATED_PERIOD, or less for a test that drives the poller itself rather than through the tracker.
+        self.min_simulated_period = MIN_SIMULATED_PERIOD
+        self._battery_due = True
+        self._low_battery_flag: bool | None = None
+        #: How many times the battery has been read: a pause waits for a fresh reading before trusting it again.
+        self.battery_reads = 0
+
+    def request_battery(self) -> None:
+        """Checks the battery at the next reading: after a battery swap, say."""
+        self._battery_due = True
+
+    @property
+    def low_battery(self) -> bool | None:
+        """Whether the meter's battery is low: its own flag where it has one (the 121GW), otherwise its level against
+        battery_text.LOW_PERCENT. None for a meter that says nothing about a battery."""
+        from ..ui import battery_text
+
+        if self._low_battery_flag is not None:
+            return self._low_battery_flag
+        p = self.battery_percent
+        return None if p is None else battery_text.is_low(p)
 
     def _elapsed(self) -> float:
         return time.perf_counter() - self._clock0
@@ -121,6 +151,8 @@ class MeterPoller:
 
     def _poll(self) -> None:
         period = self._interval / self._speed
+        if self._speed > 1:
+            period = max(period, self.min_simulated_period)
         nxt = 0.0
         failures = 0
         meter = self._meter
@@ -128,6 +160,7 @@ class MeterPoller:
             try:
                 if not self.is_connected:
                     meter.connect()
+                    self._battery_due = True  # a meter back from being off may have a new battery
                     self.is_connected = True
                     self.state = LinkState.Connected
                     failures = 0
@@ -140,9 +173,12 @@ class MeterPoller:
                         command(meter)
                     except Exception:
                         pass  # a beep that fails is not worth losing the link over
-                if self.read_count % self.battery_every == 0:
+                if self._battery_due or self.read_count % self.battery_every == 0:
                     b = meter.read_battery_percent()
                     self.battery_percent = b if b is not None else self.battery_percent
+                    self._low_battery_flag = meter.read_low_battery()
+                    self._battery_due = False
+                    self.battery_reads += 1
                 self._attempts += 1
                 r = meter.read()
                 self.read_count += 1

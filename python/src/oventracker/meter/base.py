@@ -90,6 +90,11 @@ class TemperatureMeter:
     def read_battery_percent(self) -> float | None:
         return None
 
+    def read_low_battery(self) -> bool | None:
+        """Whether the meter says its battery is low, for a meter that has a low-battery flag rather than a level
+        (the 121GW). None if it can't say; then the level from :meth:`read_battery_percent` decides."""
+        return None
+
     def read_auto_power_off(self) -> "AutoPowerOffSetting":
         """What the meter's auto power-off is set to, if it can say: unknown by default."""
         from .auto_power_off import AutoPowerOffSetting
@@ -120,3 +125,12 @@ class OvenSimulation(Protocol):
     def pretend_used(self, setpoint_c: float) -> None: ...
 
     def set_auto_power_off(self, after: "timedelta | None") -> None: ...
+
+    def set_battery(self, lasts_for: "timedelta | None") -> None:
+        """Makes the simulated meter's battery run down over this long (--sim-battery), its readings going wrong
+        as it does."""
+        ...
+
+    def swap_battery(self) -> None:
+        """"Swaps" the simulated meter's battery: it's off for a couple of minutes, then back with a full one."""
+        ...

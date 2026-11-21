@@ -15,6 +15,7 @@ public sealed class Eevblog121GwDriver : IMeterDriver
     public static readonly TimeSpan DefaultAutoPowerOff = TimeSpan.FromMinutes(30);
 
     public string Name => DriverName;
+    public bool HasBattery => true;
     public string Description => "EEVblog 121GW over Bluetooth LE";
 
     public string ResourceHelp => "a paired Bluetooth LE meter, by address or name, e.g. ble:C4:BE:84:12:34:56 or ble:121GW; found by itself if left out";

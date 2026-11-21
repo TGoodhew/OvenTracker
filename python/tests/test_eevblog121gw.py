@@ -212,6 +212,7 @@ def test_the_meter_connects_and_reads_each_packet_once():
         assert meter.read_auto_power_off().timeout == timedelta(minutes=30)
         assert meter.read_config().is_temperature
         assert meter.low_battery is False
+        assert meter.read_low_battery() is False
 
         # The first reading is the packet that arrived while connecting; after that, read waits for a newer one.
         assert meter.read().celsius == pytest.approx(180.0, abs=5e-7)
@@ -225,6 +226,7 @@ def test_the_meter_connects_and_reads_each_packet_once():
         assert result[0].celsius == pytest.approx(181.2, abs=5e-7)
         assert meter.read_auto_power_off().state == AutoPowerOffState.Off
         assert meter.low_battery is True
+        assert meter.read_low_battery() is True  # the flag the poller goes by (#51)
         assert meter.read_battery_percent() is None
         assert meter.packets_received == 2
     finally:

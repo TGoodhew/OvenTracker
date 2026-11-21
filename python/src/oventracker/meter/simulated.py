@@ -102,6 +102,18 @@ class SimulatedMeter(TemperatureMeter):
         self.auto_power_off_after: timedelta | None = None
         #: How long the simulated meter stays off before "someone presses a button".
         self.wakes_after = timedelta(minutes=2)
+        #: How long the battery lasts, as --sim-battery sets it: forever (None) by default.
+        self.battery_lasts_for: timedelta | None = None
+        self._battery_since = now
+        self._battery_noise = random.Random(7)
+
+    @property
+    def battery_percent(self) -> float:
+        """The battery's charge: 81.4 % for ever, or running down over :attr:`battery_lasts_for`."""
+        lasts = self.battery_lasts_for
+        if lasts is None:
+            return 81.4
+        return max(0.0, 100 - 100 * (self._clock - self._battery_since).total_seconds() / lasts.total_seconds())
 
     @property
     def location(self) -> str:
@@ -131,11 +143,15 @@ class SimulatedMeter(TemperatureMeter):
                 raise TimeoutError("The simulated meter has switched itself off.")
             self._off_since = None  # someone pressed a button
             self._awake_since = self._clock
-        v = round_digits(self.oven.probe_c(), 1)
+        probe = self.oven.probe_c()
+        # A nearly flat battery gives false readings, as a real one does: jumping tens of degrees.
+        if self.battery_lasts_for is not None and self.battery_percent < 10:
+            probe += (self._battery_noise.random() - 0.5) * 100
+        v = round_digits(probe, 1)
         return MeterReading(self._clock, ReadingStatus.Ok, v, fixed(v, 1))
 
     def read_battery_percent(self) -> float | None:
-        return 81.4
+        return self.battery_percent
 
     def read_auto_power_off(self) -> AutoPowerOffSetting:
         t = self.auto_power_off_after
@@ -149,6 +165,14 @@ class SimulatedMeter(TemperatureMeter):
 
     def set_auto_power_off(self, after: timedelta | None) -> None:
         self.auto_power_off_after = after
+
+    def set_battery(self, lasts_for: timedelta | None) -> None:
+        self.battery_lasts_for = lasts_for
+        self._battery_since = self._clock
+
+    def swap_battery(self) -> None:
+        self._off_since = self._clock  # switched off for the swap, back on after wakes_after
+        self._battery_since = self._clock + self.wakes_after
 
     def pretend_used(self, setpoint_c: float) -> None:
         self.oven.set(OvenMode.Bake, setpoint_c)
@@ -170,6 +194,7 @@ class SimulatedDriver(MeterDriver):
     description = "a simulated oven and meter"
     resource_help = "nothing (there is only one)"
     is_simulation = True
+    has_battery = True
 
     _APO = AutoPowerOff(
         timedelta(minutes=10), ["Leave out --sim-apo."], how_to_wake="wait: the simulated meter wakes by itself after 2 minutes"

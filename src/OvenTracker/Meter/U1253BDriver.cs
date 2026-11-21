@@ -10,6 +10,7 @@ public sealed class U1253BDriver : IMeterDriver
     public const string DriverName = "u1253b";
 
     public string Name => DriverName;
+    public bool HasBattery => true;
     public string Description => "Keysight U1253B through a U1177A Bluetooth adapter (or a U1173 cable)";
     public string ResourceHelp => OperatingSystem.IsWindows()
         ? "a serial port, e.g. COM5, optionally with its settings (9600 8N1 by default), e.g. COM5:9600,N,8,1"

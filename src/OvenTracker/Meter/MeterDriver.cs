@@ -53,6 +53,12 @@ public interface IMeterDriver
     /// </summary>
     AutoPowerOff? AutoPowerOff => null;
 
+    /// <summary>
+    /// Whether this kind of meter runs on a battery. When it runs low mid-setpoint, the app pauses for a battery swap
+    /// and carries on with the same setpoint. False (the default) for a mains-powered bench meter.
+    /// </summary>
+    bool HasBattery => false;
+
     /// <summary>The settings this driver takes through --meter-option. None by default.</summary>
     IReadOnlyList<MeterOption> Options => [];
 

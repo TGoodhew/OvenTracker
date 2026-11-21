@@ -66,6 +66,7 @@ class RunSettings(SharedSettings):
     remind: float = 1.0
     sim_forget: int | None = None
     sim_apo: float | None = None
+    sim_battery: float | None = None
     yes: bool = False
 
     def validate(self) -> str | None:
@@ -176,6 +177,20 @@ def build_plan(modes: list[OvenMode], setpoints_c: list[float], grouped: bool) -
 def runs_folder() -> str:
     """Where runs are saved by default: Documents/OvenTracker (on Linux ~/Documents/OvenTracker, or ~/OvenTracker)."""
     return ovens.runs_folder()
+
+
+#: Below this, a battery meter's charge is mentioned before a run: a long session will probably need a swap.
+BATTERY_NOTE_PERCENT = 60.0
+
+
+def battery_note(percent: float | None) -> str | None:
+    """What to say on connecting about a battery that won't last a long session, or None."""
+    if percent is None or not percent < BATTERY_NOTE_PERCENT:
+        return None
+    return (
+        f"The meter's battery is at {fixed(percent, 0)} %, and a long session will probably need a fresh one. "
+        "When it runs low the app pauses, so you can swap it, then carries on with the same setpoint."
+    )
 
 
 def choose_driver(s: RunSettings, settings: AppSettings) -> MeterDriver:
@@ -453,6 +468,10 @@ def _execute(s: RunSettings, token: CancellationToken) -> int:
         c.print(f"[green]Connected[/] to {ui.escape(str(identity))} on {ui.escape(found.resource)}.")
         for note in found.notes or []:
             c.print(f"[yellow]{ui.escape(note)}[/]")
+        if driver.has_battery:
+            note = battery_note(meter.read_battery_percent())
+            if note is not None:
+                c.print(f"[yellow]{ui.escape(note)}[/]")
         config = meter.read_config()
         if config is not None and not config.is_temperature:
 
@@ -475,6 +494,8 @@ def _execute(s: RunSettings, token: CancellationToken) -> int:
     oven = meter if isinstance(meter, OvenSimulation) else None
     if s.sim_apo is not None and oven is not None:
         oven.set_auto_power_off(timedelta(minutes=s.sim_apo))
+    if s.sim_battery is not None and oven is not None:
+        oven.set_battery(timedelta(minutes=s.sim_battery))
     # Prompts need a terminal; without one (output to a file or pipe), the run goes on as with --yes.
     interactive = ui.live()
     missing = _missing_without_terminal(s) if not interactive else None
@@ -755,6 +776,7 @@ def _execute(s: RunSettings, token: CancellationToken) -> int:
         driver.is_simulation,
         driver.auto_power_off,
         sensor.max_c if sensor is not None else None,
+        driver.has_battery,
     )
     waiter = ResetWaiter(poller, recorder, f, assumed, ambient_c is None, driver.is_simulation, driver.auto_power_off)
     st: dict[str, Any] = {
