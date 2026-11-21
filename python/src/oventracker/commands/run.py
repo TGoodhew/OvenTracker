@@ -749,6 +749,13 @@ def _execute(s: RunSettings, token: CancellationToken) -> int:
     ask = should_ask(s.yes, driver.is_simulation, ui.keys())
     first_prompt = True
 
+    def save_results() -> Report:
+        """results.json and report.md as they stand: after each setpoint, and at the end (RunCommand.SaveResults)."""
+        results[:] = sorted(results, key=lambda r: r.point.index)
+        now = Report(st["info"], results)
+        recorder.write_results(st["info"], results, now.markdown())
+        return now
+
     def plan_phase2() -> bool:
         """Characterise, phase 2: change the adjustment (towards correct, by at least --step), then the lowest and
         highest setpoints again in each mode, highest first so the oven cools only once. False if it can't go on."""
@@ -894,6 +901,12 @@ def _execute(s: RunSettings, token: CancellationToken) -> int:
                     st["after_reset"] = False
                     results[:] = [r for r in results if r.point.index != point.index]
                     results.append(result)
+                    # Saved as each setpoint finishes, so a crash, a closed window or a second Ctrl+C loses at most the
+                    # setpoint in progress, not the report (#43). A save that fails (a full disk) mustn't stop the measuring.
+                    try:
+                        save_results()
+                    except OSError as ex:
+                        c.print(f"[yellow]Couldn't save the results so far: {ui.escape(str(ex))}. The readings are still being recorded.[/]")
                     poller.enqueue(lambda m: m.beep())
                     ui.bell()
                     console_report.point_summary(Report(st["info"], results), result)
@@ -921,17 +934,22 @@ def _execute(s: RunSettings, token: CancellationToken) -> int:
             if os.environ.get("OVENTRACKER_DEBUG"):
                 traceback.print_exc()
         finally:
-            if oven is not None:
-                oven.set_oven(OvenMode.Bake, None)
-            poller.stop()
-            _drain_idle(poller, recorder)
-            meter.dispose()
+            # Each step on its own: a meter or link failing as it closes must not stop the results being written.
+            for step in (
+                lambda: oven.set_oven(OvenMode.Bake, None) if oven is not None else None,
+                poller.stop,
+                lambda: _drain_idle(poller, recorder),
+                meter.dispose,
+            ):
+                try:
+                    step()
+                except Exception:
+                    pass
 
         info = st["info"]
         plan = st["plan"]
-        results = sorted(results, key=lambda r: r.point.index)
-        report = Report(info, results)
-        recorder.write_results(info, results, report.markdown())
+        report = save_results()
+        results = list(report.results)
     finally:
         recorder.close()
     c.print()
