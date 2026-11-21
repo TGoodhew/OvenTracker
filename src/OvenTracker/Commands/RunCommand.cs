@@ -14,11 +14,11 @@ namespace OvenTracker.Commands;
 public class RunSettings : SharedSettings
 {
     [CommandOption("--meter <DRIVER>")]
-    [Description("Which kind of meter: u1253b (the default), 34401a (with a PT100), or simulated. [bold]oventracker meters[/] lists them and what each can see.")]
+    [Description("Which kind of meter: u1253b (the default), 34401a (with a PT100), 121gw (EEVblog, Bluetooth LE), or simulated. [bold]oventracker meters[/] lists them and what each can see.")]
     public string? Meter { get; set; }
 
     [CommandOption("-r|--resource <WHERE>")]
-    [Description("Where the meter is, in the driver's terms: COM5 for the U1253B (found automatically if left out), GPIB0::22::INSTR or COM3 for the 34401A. Remembered.")]
+    [Description("Where the meter is, in the driver's terms: COM5 for the U1253B (found automatically if left out), GPIB0::22::INSTR or COM3 for the 34401A, ble:<address> for the 121GW. Remembered.")]
     public string? Resource { get; set; }
 
     [CommandOption("--meter-option <KEY=VALUE>")]
@@ -115,7 +115,7 @@ public class RunSettings : SharedSettings
         if (Meter is not null && MeterDrivers.Find(Meter) is null) return ValidationResult.Error($"--meter must be one of: {MeterDrivers.Names}.");
         if (Simulate && Meter is not null && MeterDrivers.Find(Meter)?.IsSimulation != true) return ValidationResult.Error("--simulate can't be used with another --meter.");
         if ((Resource ?? Port) is { } where && ResourceSpec.Parse(where) is null)
-            return ValidationResult.Error($"--resource \"{where}\" isn't one the app understands. Examples: COM5, COM5:9600,E,7,2 (with serial settings), /dev/ttyUSB0, GPIB0::22::INSTR.");
+            return ValidationResult.Error($"--resource \"{where}\" isn't one the app understands. Examples: COM5, COM5:9600,E,7,2 (with serial settings), /dev/ttyUSB0, GPIB0::22::INSTR, ble:C4:BE:84:12:34:56.");
         if (MeterDrivers.ParseOptions(MeterOptions) is null) return ValidationResult.Error("--meter-option takes key=value, e.g. --meter-option rtd=pt100-b.");
         if (Port is not null && Resource is not null && !string.Equals(Port, Resource, StringComparison.OrdinalIgnoreCase))
             return ValidationResult.Error("Give the meter's location once, with --resource.");

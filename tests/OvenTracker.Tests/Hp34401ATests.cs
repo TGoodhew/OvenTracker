@@ -186,7 +186,7 @@ public class Hp34401ATests
     [Fact]
     public void OnlyGpibAndSerialAreItsConnections()
     {
-        Assert.Contains("USB or LAN", Hp34401ADriver.Check("USB0::0x0957::0x0607::MY1::INSTR"));
+        Assert.Contains("USB, LAN or Bluetooth", Hp34401ADriver.Check("USB0::0x0957::0x0607::MY1::INSTR"));
         Assert.Null(Hp34401ADriver.Check("COM3"));
         Assert.Null(Hp34401ADriver.Check("COM3:9600,N,8,2"));
         if (!Visa.IsAvailable) Assert.Contains("VISA isn't installed", Hp34401ADriver.Check("GPIB0::22::INSTR"));

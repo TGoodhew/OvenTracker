@@ -89,6 +89,7 @@ public sealed class U1253BDriver : IMeterDriver
     {
         null => $"\"{resource}\" isn't a serial port the app understands (e.g. COM5, or COM5:9600,N,8,1).",
         { Visa: true, Transport: var t } => $"the U1253B connects only through a serial port (COM5, /dev/rfcomm0), not {ResourceSpec.Describe(t)} through VISA.",
+        { Transport: not Transport.Serial and var t } => $"the U1253B connects only through a serial port (COM5, /dev/rfcomm0), not {ResourceSpec.Describe(t)}.",
         _ => null,
     };
 
