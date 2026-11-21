@@ -4,8 +4,8 @@
 
 Checks how accurate an oven's temperature setting really is, in **bake** and **convection**, using a
 connected multimeter with a type K thermocouple: a Keysight (Agilent) **U1253B** (through a U1177A
-IR-to-Bluetooth adapter), an EEVblog **121GW** (Bluetooth LE) or an HP **34401A** bench meter (GPIB or
-RS-232). [Other meters](#other-meters) has the details.
+IR-to-Bluetooth adapter), an EEVblog **121GW** or a UNI-T **UT60BT** (both Bluetooth LE), or an HP **34401A**
+bench meter (GPIB or RS-232). [Other meters](#other-meters) has the details.
 
 It comes in two versions, with the same commands, screens and results:
 - **The .NET 11 app,** for Windows and Linux, with a live [Spectre.Console](https://spectreconsole.net)
@@ -101,8 +101,8 @@ The binding doesn't survive a restart, so run `rfcomm bind` again after one. A U
 as `/dev/ttyUSB0` instead; give it with `--resource /dev/ttyUSB0`. `OvenTracker meters` lists the serial
 devices it can see.
 
-An EEVblog 121GW connects by Bluetooth LE through BlueZ instead, with no binding needed; see
-[The EEVblog 121GW](#the-eevblog-121gw).
+An EEVblog 121GW or a UNI-T UT60BT connects by Bluetooth LE through BlueZ instead, with no binding needed;
+see [The EEVblog 121GW](#the-eevblog-121gw) and [The UNI-T UT60BT](#the-uni-t-ut60bt).
 
 On Linux, runs are saved to `~/Documents/OvenTracker` (or `~/OvenTracker` if there is no `~/Documents`).
 The app remembers the last meter in `~/.config/OvenTracker`.
@@ -158,7 +158,7 @@ in: that cycle is left out, and the others are kept.
 
 ### Battery swaps
 
-A meter running on a battery (the U1253B, the 121GW) gives false readings once its battery is low. The
+A meter running on a battery (the U1253B, the 121GW, the UT60BT) gives false readings once its battery is low. The
 U1253B's guide says to change it as soon as the low-battery sign shows. A characterise session can outlast a
 battery, so the app watches for it:
 - **When the battery runs low** (below 20 %, checked every minute), or a reading jumps faster than an oven can
@@ -294,13 +294,14 @@ adjustment](docs/oven-control-model.md) explains the method.
 
 ## Other meters
 
-Each kind of meter has a driver in `src/OvenTracker/Meter`. Four come with the app:
+Each kind of meter has a driver in `src/OvenTracker/Meter`. Five come with the app:
 
 | `--meter` | What it is | `--resource` |
 | --- | --- | --- |
 | `u1253b` (the default) | A Keysight U1253B (or another U1250-series meter) through a U1177A Bluetooth adapter or a U1173 cable | A serial port: `COM5` on Windows, `/dev/rfcomm0` on Linux (9600 8N1, or give settings: `COM5:9600,N,8,1`). Left out, the app tries the port that worked last time, then each Bluetooth link. |
 | `34401a` | An HP / Agilent / Keysight 34401A bench DMM reading a type K thermocouple as DC millivolts (see below) | `GPIB0::22::INSTR` (or `gpib:22`) through VISA, or a serial port for its RS-232 port: `COM3`, `/dev/ttyUSB0` (9600, even parity, 7 data bits, 2 stop bits from the factory, or give settings: `COM3:9600,N,8,2`). Required the first time, then remembered. |
 | `121gw` | An EEVblog 121GW with a type K thermocouple, over Bluetooth LE (Windows and Linux) | `ble:C4:BE:84:12:34:56` or `ble:121GW`. Left out, the app tries the one that answered last time, then each 121GW the system knows (on Linux it scans if there's none). |
+| `ut60bt` | A UNI-T UT60BT with a type K thermocouple, over Bluetooth LE (Windows and Linux) | `ble:C4:BE:84:12:34:56` or `ble:UT60BT`. Left out, the app tries the one that answered last time, then each UT60BT the system knows (on Linux it scans if there's none). |
 | `simulated` | A made-up oven and meter. `--simulate` is short for `--meter simulated`. | Not used. |
 
 Without `--meter` the app uses the meter that answered last time, or the U1253B. `oventracker meters` lists what
@@ -397,14 +398,49 @@ meter just has to be on with Bluetooth on. `oventracker-py meters --meter 121gw`
 what it finds, with any 121GW first. bleak works on Windows, Linux (through BlueZ) and macOS, though only the
 first two have been exercised.
 
+### The UNI-T UT60BT
+
+The UT60BT is a handheld meter with Bluetooth LE and a type K thermocouple input. Unlike the 121GW it sends
+only when asked, so the app asks it for its name, then for data. The app takes its temperature mode, in °C or
+°F as the meter shows it.
+
+```powershell
+OvenTracker.exe meters --meter ut60bt         # the Bluetooth LE devices it knows; a UT60BT is marked
+OvenTracker.exe run --meter ut60bt            # finds the UT60BT by itself
+```
+
+- **Bluetooth on at the meter:** Bluetooth is off each time the meter is switched on. Hold SELECT until BT
+  shows on the display; it flashes until the app connects.
+- **Pairing, and Linux:** as for the 121GW. On Windows pair it first (Add device, Bluetooth, then UT60BT). On
+  Linux the app goes through BlueZ and scans if it doesn't know the meter yet.
+- **Only plain temperature counts:** with HOLD, REL or MAX/MIN on, the display isn't the live temperature, so
+  the app waits as it does for the wrong dial position. SELECT switches between °C and °F.
+- **Whole degrees:** it shows temperature to 1 °C or 1 °F. Its own accuracy above 100 °C is ±(2.0 % + 5) in °C,
+  or ±(2.5 % + 5) in °F above 212 °F: about ±9 °C (±15 °F) at 400 °F. That is much coarser than the U1253B.
+  Averaging many readings gives a mean finer than one step, but the meter's own error adds to it.
+- **The probe that comes with it:** the manual rates the bead thermocouple supplied with the meter below
+  250 °C (482 °F). For setpoints above that, use a type K probe rated for oven temperatures.
+- **Auto power-off:** 15 minutes without use. The meter doesn't say whether it's on, so the app always warns.
+  To turn it off, switch the meter on from OFF while holding SELECT for more than 2 seconds. It's back on the
+  next time the meter is switched on, and it beeps five times a minute before it switches off.
+- **Battery:** three AAA cells. The meter reports only its low-battery sign, from 4.2 V, not a level. Below
+  3.6 V it switches itself off. So the app pauses for a battery swap when the sign shows.
+
+The protocol comes from three open-source decoders: dmmpy, unit_ut61eplus (the UT61E+, which shares the
+frame), and libreble's notes from a real UT60BT. They disagree on the command that asks for data, so the app
+uses both (see the protocol notes). The driver hasn't been tried on a UT60BT yet. Report what you find.
+
+**In the Python app** the UT60BT goes through bleak too (`pip install "./python[ble]"`), with no pairing:
+`oventracker-py meters --meter ut60bt` scans for 5 seconds.
+
 To add a meter, for example a bench DMM with a thermocouple input, implement `ITemperatureMeter` and
 `IMeterDriver` and list the driver in `MeterDrivers.All`. Only four members are required; the rest (the
 sensor, battery, beep, and the meter's auto power-off setting) are optional. A driver can also declare that
 its meter switches itself off, with the steps to turn that off, and the app then warns before a run.
 [Adding a meter](docs/adding-a-meter.md) explains every member, with a sketch of a SCPI bench-meter driver.
 `U1253BDriver` (serial and Bluetooth), `Hp34401ADriver` (GPIB through VISA, RS-232, and its own
-`--meter-option` settings), `Eevblog121GwDriver` (Bluetooth LE, a streamed protocol) and `SimulatedDriver`
-are the worked examples.
+`--meter-option` settings), `Eevblog121GwDriver` (Bluetooth LE, a streamed protocol), `Ut60btDriver`
+(Bluetooth LE, a meter that must be asked) and `SimulatedDriver` are the worked examples.
 
 ## Protocol notes (U1253B)
 
@@ -431,6 +467,24 @@ Packets aren't aligned to notifications, so the app treats them as one stream. I
 and keeps them only if the checksum and the mode and range are valid. Each `Read` returns a packet newer than
 the last, so a slow stream never gives the same reading twice.
 
+## Protocol notes (UT60BT)
+
+The meter's Bluetooth module offers Microchip's transparent-UART service, `49535343-fe7d-4ae5-8fa9-9fafd205e455`.
+The meter notifies on `49535343-1e4d-4bd9-ba61-23c647249616` and takes commands written to
+`49535343-8841-43f4-a8d4-ecbe34729bb3`. A command is `AB CD 03`, the command byte, and a 16-bit big-endian sum of
+the four bytes before it: `5F` asks for the name, `5D` for data (libreble's, from a real UT60BT) and `5E` for
+one frame (dmmpy's and unit_ut61eplus's). The app asks for the name, waits briefly for its reply
+(`AB CD 08 "UT60BT"` and a checksum), then asks for data. It asks again whenever no frame has come for 0.7 s,
+and switches to the other data command while one goes unanswered. So a meter that streams once asked, and one
+that answers each request, both work.
+
+A data frame is 19 bytes: `AB CD 10`, the mode (10 is °C, 11 °F), the range as an ASCII digit, seven ASCII
+characters of display (sign and decimal point included; `OL` means no thermocouple), two bargraph bytes, three
+flag bytes and a 16-bit big-endian sum of the first 17. The first flag byte holds MAX, MIN, HOLD and REL. The
+second holds manual range, low battery (`0x02`) and the high-voltage warning, and the third holds the peak
+flags. The app reads the stream as the 121GW's is read: it finds `AB CD`, takes the length and keeps a frame
+only if the checksum is right.
+
 ## Protocol notes (34401A)
 
 On GPIB, commands end in LF and replies end with EOI. On RS-232 the app first sends `SYST:REM`, as the manual
@@ -446,8 +500,8 @@ front panel back.
 `python/` holds a second implementation of the whole app in Python. It has the same commands (`run`,
 `characterise`, `analyze`, `ovens`, `meters`), options, screens and files, drawn with
 [Rich](https://github.com/Textualize/rich) instead of Spectre.Console. It has every meter the app has: the
-U1253B, the 34401A (GPIB needs `pip install "./python[visa]"`), the 121GW (Bluetooth LE through
-[bleak](https://github.com/hbldh/bleak): `pip install "./python[ble]"`) and the simulator. Install it with pip
+U1253B, the 34401A (GPIB needs `pip install "./python[visa]"`), the 121GW and the UT60BT (Bluetooth LE
+through [bleak](https://github.com/hbldh/bleak): `pip install "./python[ble]"`) and the simulator. Install it with pip
 on any system, with no .NET needed:
 
 ```sh

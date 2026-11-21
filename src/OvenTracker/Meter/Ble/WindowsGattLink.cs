@@ -16,9 +16,10 @@ namespace OvenTracker.Meter.Ble;
 /// </para>
 /// </summary>
 [SupportedOSPlatform("windows")]
-public sealed class WindowsGattLink(string address, Guid service, Guid characteristic) : IBleLink
+public sealed class WindowsGattLink(string address, Guid service, Guid characteristic, Guid? write = null) : IBleLink
 {
     SafeFileHandle? handle;
+    Native.GattCharacteristic? writeCharacteristic;
     IntPtr eventHandle;
     Native.GattEventCallback? callback; // kept alive while Windows holds it
     Action<byte[]>? received;
@@ -59,6 +60,12 @@ public sealed class WindowsGattLink(string address, Guid service, Guid character
         var chars = Characteristics(handle, svc);
         var ch = chars.FirstOrDefault(c => c.CharacteristicUuid.Guid == characteristic);
         if (ch.CharacteristicUuid.Guid != characteristic) throw new MeterException($"The device {address} doesn't have the meter's GATT characteristic.");
+        if (write is { } w)
+        {
+            var wc = chars.FirstOrDefault(c => c.CharacteristicUuid.Guid == w);
+            if (wc.CharacteristicUuid.Guid != w) throw new MeterException($"The device {address} doesn't have the meter's command characteristic.");
+            writeCharacteristic = wc;
+        }
 
         // Subscribe: write the CCCD.
         var cccd = Descriptors(handle, ch).FirstOrDefault(d => d.DescriptorType == Native.ClientCharacteristicConfiguration);
@@ -74,6 +81,18 @@ public sealed class WindowsGattLink(string address, Guid service, Guid character
         callback = OnEvent;
         Check(Native.BluetoothGATTRegisterEvent(handle, Native.CharacteristicValueChangedEvent, ref reg, callback, IntPtr.Zero, out eventHandle, 0),
             "register for the meter's data");
+    }
+
+    /// <summary>Writes to the command characteristic: without a response when it allows that (as the meters' own apps do).</summary>
+    public void Write(byte[] data)
+    {
+        if (handle is null || writeCharacteristic is not { } wc) throw new MeterException("The Bluetooth LE link isn't open for writing.");
+        // BTH_LE_GATT_CHARACTERISTIC_VALUE: ULONG DataSize, then the bytes.
+        var value = new byte[Math.Max(8, 4 + data.Length)];
+        BitConverter.GetBytes(data.Length).CopyTo(value, 0);
+        data.CopyTo(value, 4);
+        var flags = wc.IsWritableWithoutResponse != 0 ? Native.WriteWithoutResponse : 0u;
+        Check(Native.BluetoothGATTSetCharacteristicValue(handle, ref wc, value, 0, flags), "send the meter a command");
     }
 
     void OnEvent(int eventType, IntPtr parameter, IntPtr context)
@@ -158,6 +177,7 @@ public sealed class WindowsGattLink(string address, Guid service, Guid character
         }
         handle?.Dispose();
         handle = null;
+        writeCharacteristic = null;
     }
 
     static class Native
@@ -166,6 +186,7 @@ public sealed class WindowsGattLink(string address, Guid service, Guid character
         public const uint DigcfPresent = 0x2, DigcfDeviceInterface = 0x10;
         public const int CharacteristicValueChangedEvent = 0;
         public const int ClientCharacteristicConfiguration = 2;
+        public const uint WriteWithoutResponse = 0x20; // BLUETOOTH_GATT_FLAG_WRITE_WITHOUT_RESPONSE
 
         // BTH_LE_GATT_DESCRIPTOR_VALUE: type (4), BTH_LE_UUID (20), a 48-byte union, DataSize (4), Data (1), padded to 80.
         public const int DescriptorValueSize = 80, SubscribeToNotificationOffset = 24, SubscribeToIndicationOffset = 25;
@@ -238,6 +259,9 @@ public sealed class WindowsGattLink(string address, Guid service, Guid character
 
         [DllImport("BluetoothApis.dll", ExactSpelling = true)]
         public static extern int BluetoothGATTSetDescriptorValue(SafeFileHandle device, ref GattDescriptor descriptor, byte[] value, uint flags);
+
+        [DllImport("BluetoothApis.dll", ExactSpelling = true)]
+        public static extern int BluetoothGATTSetCharacteristicValue(SafeFileHandle device, ref GattCharacteristic characteristic, byte[] value, ulong reliableWriteContext, uint flags);
 
         [DllImport("BluetoothApis.dll", ExactSpelling = true)]
         public static extern int BluetoothGATTRegisterEvent(SafeFileHandle service, int eventType, ref ValueChangedEventRegistration registration, GattEventCallback callback, IntPtr context, out IntPtr eventHandle, uint flags);

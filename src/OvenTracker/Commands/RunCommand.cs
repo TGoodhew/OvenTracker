@@ -14,11 +14,11 @@ namespace OvenTracker.Commands;
 public class RunSettings : SharedSettings
 {
     [CommandOption("--meter <DRIVER>")]
-    [Description("Which kind of meter: u1253b (the default), 34401a (with a type K thermocouple), 121gw (EEVblog, Bluetooth LE), or simulated. [bold]oventracker meters[/] lists them and what each can see.")]
+    [Description("Which kind of meter: u1253b (the default), 34401a (with a type K thermocouple), 121gw (EEVblog, Bluetooth LE), ut60bt (UNI-T, Bluetooth LE), or simulated. [bold]oventracker meters[/] lists them and what each can see.")]
     public string? Meter { get; set; }
 
     [CommandOption("-r|--resource <WHERE>")]
-    [Description("Where the meter is, in the driver's terms: COM5 for the U1253B (found automatically if left out), GPIB0::22::INSTR or COM3 for the 34401A, ble:<address> for the 121GW. Remembered.")]
+    [Description("Where the meter is, in the driver's terms: COM5 for the U1253B (found automatically if left out), GPIB0::22::INSTR or COM3 for the 34401A, ble:<address> for the 121GW or UT60BT. Remembered.")]
     public string? Resource { get; set; }
 
     [CommandOption("--meter-option <KEY=VALUE>")]
