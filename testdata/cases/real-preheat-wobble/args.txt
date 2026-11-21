@@ -1,0 +1,2 @@
+# a real GE PHS925 heating to 350 °F in steps, with dips: the wobbles mustn't count as reaching the setting (#49)
+runs/real-2026-11-21-preheat

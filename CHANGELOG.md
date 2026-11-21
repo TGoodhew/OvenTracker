@@ -6,6 +6,10 @@ port doesn't cover it, or a `parity` issue is open), or **Python**.
 
 ## Unreleased
 
+- An oven that heats in steps (its elements taking turns, with dips) no longer has a step taken for reaching the
+  setting and the rest for thermostat cycles: a turn short of the setting is withdrawn if the oven goes on well
+  past it (#49). Found on a GE PHS925. Has: **both**.
+
 - The Python app has the EEVblog 121GW, through bleak (`pip install "./python[ble]"`), on Windows, Linux and
   macOS, with no pairing needed (#39). Both apps: a 121GW reading can no longer be skipped, or take the next
   packet's time, when a packet arrives just as it's read; a link that fails part-way through opening is

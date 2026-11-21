@@ -1,0 +1,124 @@
+{
+  "appVersion": "1.0.0",
+  "started": "2026-11-21T09:07:10.3612763-08:00",
+  "meter": "Agilent Technologies U1253B",
+  "location": "COM5",
+  "unit": "Fahrenheit",
+  "toleranceC": 8.333333333333334,
+  "options": {
+    "precisionC": 1.1111111111111112,
+    "minCycles": 4,
+    "minBlocks": 5,
+    "blockMinutes": 3,
+    "minHysteresisC": 1,
+    "smoothingSeconds": 5,
+    "maxPointMinutes": 180,
+    "noCycleMinutes": 15,
+    "flatWindowMinutes": 10,
+    "flatSlopeCPerMinute": 0.15,
+    "driftHorizonMinutes": 30,
+    "defaultCycleMinutes": 6
+  },
+  "plan": [
+    {
+      "index": 1,
+      "mode": "Bake",
+      "setpointC": 176.66666666666666,
+      "adjustmentC": 0
+    },
+    {
+      "index": 2,
+      "mode": "Convection",
+      "setpointC": 176.66666666666666,
+      "adjustmentC": 0
+    },
+    {
+      "index": 3,
+      "mode": "Bake",
+      "setpointC": 204.44444444444446,
+      "adjustmentC": 0
+    },
+    {
+      "index": 4,
+      "mode": "Convection",
+      "setpointC": 204.44444444444446,
+      "adjustmentC": 0
+    },
+    {
+      "index": 5,
+      "mode": "Bake",
+      "setpointC": 232.22222222222223,
+      "adjustmentC": 0
+    },
+    {
+      "index": 6,
+      "mode": "Convection",
+      "setpointC": 232.22222222222223,
+      "adjustmentC": 0
+    }
+  ],
+  "driver": "u1253b",
+  "identity": {
+    "manufacturer": "Agilent Technologies",
+    "model": "U1253B",
+    "serial": "MY00000000",
+    "firmware": "V2.19"
+  },
+  "sensor": {
+    "name": "Fluke 80BK-A type K probe",
+    "limitC": 2.2,
+    "limitFraction": 0.02,
+    "limitsAdd": false,
+    "maxC": 260,
+    "isGenericType": false
+  },
+  "adjustmentC": 0,
+  "adjust": {
+    "stepC": 0.5555555555555556,
+    "rangeC": 19.444444444444443,
+    "objective": "Balanced",
+    "model": "Shift",
+    "sharedAcrossModes": true
+  },
+  "ambientC": 20.908611111111107,
+  "sittings": [
+    "2026-11-21T09:07:10.3612763-08:00"
+  ],
+  "oven": {
+    "key": "ge-phs925",
+    "name": "GE Profile PHS925ST1SS",
+    "adjustStepC": 0.5555555555555556,
+    "adjustRangeC": 19.444444444444443,
+    "sharedAdjustment": true,
+    "howToRead": [
+      "Touch BROIL HI/LO and BAKE at the same time until the display shows SF.",
+      "Touch BAKE. The display shows the adjustment: positive is hotter, negative cooler.",
+      "Touch START to leave without changing it."
+    ],
+    "howToChange": [
+      "Touch BROIL HI/LO and BAKE at the same time until the display shows SF.",
+      "Touch BAKE. The display shows the adjustment set now.",
+      "Touch BAKE again to switch between positive (hotter) and negative (cooler).",
+      "Type the amount on the number pads, e.g. 1 then 0 for 10.",
+      "Check the display shows the right sign, then touch START."
+    ],
+    "convectionConversionC": 13.88888888888889,
+    "howToTurnOffConversion": [
+      "Touch BAKE and BROIL HI/LO at the same time until the display shows SF.",
+      "Touch CONVECTION COOK until the display shows CON OFF.",
+      "Touch START."
+    ],
+    "typicalCycleMinutes": 20,
+    "notes": [
+      "The adjustment affects baking and roasting, not broil or self-clean, and is kept through a power cut.",
+      "The manual doesn\u0027t say whether convection has an adjustment of its own; the app assumes it shares bake\u0027s."
+    ],
+    "source": "GE PHS925ST1SS owner\u0027s manual, pp. 15, 17 and 26; the display\u0027s sign confirmed on the oven, and its ~20-minute cycle measured, 2026-11-20.",
+    "isGeneric": false,
+    "defaultMaxMinutes": 180
+  },
+  "characterise": {
+    "stepC": 5.555555555555555,
+    "fromC": 0
+  }
+}
