@@ -41,6 +41,15 @@ def waited(seconds: float) -> str:
     return f"{fixed(math.floor(seconds / 60), 0)} min" if seconds / 60 >= 1 else f"{fixed(math.floor(seconds), 0)} s"
 
 
+def for_figlet(text: str) -> str:
+    """ChangePrompt.ForFiglet: text the big (FigletText) font can draw. It has only ASCII, so a "−10 °F" would
+    lose its minus sign and show as "10 F", the opposite of what to do: minus signs and dashes become "-", "°" is
+    dropped, and anything else it can't draw is left out."""
+    # U+2212 (minus sign), U+2013 (en dash) and U+2014 (em dash).
+    text =text.replace("−", "-").replace("–", "-").replace("—", "-").replace("°", "")
+    return "".join(ch for ch in text if " " <= ch <= "~")
+
+
 def _answer(choice: Any) -> str:
     """How a choice is written in the answered: event: the enum's name, True or False, or nothing."""
     if choice is None:
@@ -75,7 +84,7 @@ def view(
         parts.append(markup(f"[green]{escape(done)}[/]"))
     parts.append(markup(f"[bold]{escape(heading)}[/]"))
     for line in big:
-        parts.append(FigletText(line.replace("°", ""), "orange1"))
+        parts.append(FigletText(for_figlet(line), "orange1"))
     battery = battery_text.markup(battery_percent)
     parts.append(
         markup(

@@ -153,12 +153,16 @@ public sealed class AnalyzeCommand : Command<AnalyzeSettings>
         if (s.SaveGains || info.Characterise is { ChangedToC: not null })
         {
             var oven = info.Oven ?? OvenProfiles.Default;
-            if (s.SaveGains && oven.IsGeneric)
+            // A simulation's gains are made up, so they're never saved; a real run's only when asked.
+            var simulated = info.Driver == Meter.SimulatedDriver.DriverName;
+            if (s.SaveGains && oven.IsGeneric && !simulated)
             {
                 AnsiConsole.MarkupLine("[red]--save-gains needs the oven: give --oven <key> (docs/adding-an-oven.md).[/]");
                 return 1;
             }
-            RunCommand.SaveCharacterisation(info, results, folder, oven, save: s.SaveGains);
+            RunCommand.SaveCharacterisation(info, results, folder, oven, save: s.SaveGains && !simulated,
+                notSavedBecause: simulated ? RunCommand.SimulationNotSaved
+                    : "The gains aren't saved to the oven's profile. To save them, run analyze again with --save-gains" + (oven.IsGeneric ? " and --oven <yours> (docs/adding-an-oven.md)." : "."));
         }
         return 0;
     }

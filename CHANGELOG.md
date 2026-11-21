@@ -6,6 +6,13 @@ port doesn't cover it, or a `parity` issue is open), or **Python**.
 
 ## Unreleased
 
+- Display fixes (#41). Has: **both**.
+  - The big "set the adjustment" prompt keeps its minus sign: it showed "10 F" for −10 °F.
+  - The dashboard fits the window: it's measured, not estimated, and a small window gets a compact layout.
+  - With output redirected, "the oven is ready" is said once, not on every pass, and "ready in about under a minute" reads properly.
+  - `analyze` of a real characterise run says to add `--save-gains`, not that it's a simulation.
+  - A U1253B reading taken as the dial moves is judged by the new setting rather than lost.
+
 - Stopping a session no longer crashes the app if the meter is busy (a Bluetooth write timing out after Stop), and `results.json` and `report.md` are saved as each setpoint finishes, so a crash, a closed window or a second Ctrl+C loses at most the setpoint in progress (#43). Has: **both**.
 
 - Consistency fixes in the analysis and recording (#36). Has: **both**.

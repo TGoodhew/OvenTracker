@@ -13,6 +13,7 @@ from ..analysis.characterisation import Characterisation
 from ..analysis.session_summary import PointResult, TestPoint, judge
 from ..analysis.setpoint_analyzer import AnalysisOptions
 from ..jsonio import DateTimeOffset, dumps
+from ..meter.simulated import DRIVER_NAME as SIMULATED
 from ..ovens import OvenProfile
 from ..session.recording import SessionInfo, replay, results_json
 from ..session.report import Report, verdict_text
@@ -131,7 +132,26 @@ def combine(
     return replace(latest, adjustment_c=adj_latest, plan=[r.point for r in results]), results
 
 
-def save_characterisation(info: SessionInfo, results: list[PointResult], folder: str, oven: OvenProfile, save: bool, out: TextIO) -> Characterisation:
+#: Why a simulation's gains aren't saved (RunCommand.SimulationNotSaved).
+SIMULATION_NOT_SAVED = "A simulation: the gains aren't saved to any oven's profile."
+
+
+def _gains_decision(info: SessionInfo, oven: OvenProfile, save_gains: bool) -> tuple[bool, str]:
+    """Whether analyze saves a characterisation's gains, and why not when it doesn't: a simulation's gains are made
+    up, so they're never saved; a real run's only when asked (--save-gains)."""
+    simulated = info.driver == SIMULATED
+    because = (
+        SIMULATION_NOT_SAVED
+        if simulated
+        else "The gains aren't saved to the oven's profile. To save them, run analyze again with --save-gains"
+        + (" and --oven <yours> (docs/adding-an-oven.md)." if oven.is_generic else ".")
+    )
+    return save_gains and not simulated, because
+
+
+def save_characterisation(
+    info: SessionInfo, results: list[PointResult], folder: str, oven: OvenProfile, save: bool, out: TextIO, not_saved_because: str | None = None
+) -> Characterisation:
     """Writes characterisation.md and .json beside the report (RunCommand.SaveCharacterisation). Saving the
     measured gains to the oven's profile (--save-gains) isn't supported by the Python port yet."""
     ch = Characterisation.from_results(info, results)
@@ -143,7 +163,9 @@ def save_characterisation(info: SessionInfo, results: list[PointResult], folder:
     print(f"Wrote {md_path} and {os.path.basename(json_path)}.", file=out)
     if not ch.measured_any:
         print("No gain could be measured: no setpoint was finished at both adjustments.", file=out)
-    elif save:
+    elif not save:
+        print(not_saved_because if not_saved_because is not None else SIMULATION_NOT_SAVED, file=out)
+    else:
         print(
             "--save-gains isn't supported by the Python port yet: the gains weren't saved to the oven's profile. "
             "Use the C# app (oventracker analyze ... --save-gains) to save them.",
@@ -153,11 +175,19 @@ def save_characterisation(info: SessionInfo, results: list[PointResult], folder:
 
 
 def save_characterisation_rich(
-    info: SessionInfo, results: list[PointResult], folder: str, oven: OvenProfile, save: bool, oven_folder: str | None = None
+    info: SessionInfo,
+    results: list[PointResult],
+    folder: str,
+    oven: OvenProfile,
+    save: bool,
+    oven_folder: str | None = None,
+    not_saved_because: str | None = None,
 ) -> Characterisation:
     """RunCommand.SaveCharacterisation: writes characterisation.md and .json beside the run, shows them, and saves
     the measured gains to the oven's profile: not for the generic profile (it stands for every oven), and not for
-    a simulation. ``oven_folder``: where oven profiles are saved (the usual folder when None)."""
+    a simulation. ``save``: save the gains to the oven's profile. ``oven_folder``: where oven profiles are saved
+    (the usual folder when None). ``not_saved_because``: when not saving, why, for the message (a simulation's
+    reason if not given)."""
     from ..ui import console as ui
     from ..ui.widgets import Rule, plain_print
     from .names import APP_NAME
@@ -173,7 +203,7 @@ def save_characterisation_rich(
     if not ch.measured_any:
         c.print("[yellow]No gain could be measured: no setpoint was finished at both adjustments.[/]")
     elif not save:
-        c.print("[grey]A simulation: the gains aren't saved to any oven's profile.[/]")
+        c.print(f"[grey]{ui.escape(not_saved_because if not_saved_because is not None else SIMULATION_NOT_SAVED)}[/]")
     elif oven.is_generic:
         c.print(
             "[yellow]The gains aren't saved: the generic profile stands for every oven. Describe yours (docs/adding-an-oven.md), "
@@ -250,10 +280,12 @@ def _execute_rich(s: AnalyzeSettings) -> int:
 
     if s.save_gains or (info.characterise is not None and info.characterise.changed_to_c is not None):
         oven = info.oven if info.oven is not None else ovens.DEFAULT
-        if s.save_gains and oven.is_generic:
+        # A simulation's gains are never saved, so it needs no oven to save them to (AnalyzeCommand).
+        if s.save_gains and oven.is_generic and info.driver != SIMULATED:
             c.print("[red]--save-gains needs the oven: give --oven <key> (docs/adding-an-oven.md).[/]")
             return 1
-        save_characterisation_rich(info, results, folder, oven, s.save_gains)
+        save, because = _gains_decision(info, oven, s.save_gains)
+        save_characterisation_rich(info, results, folder, oven, save, not_saved_because=because)
     return 0
 
 
@@ -329,8 +361,10 @@ def execute(s: AnalyzeSettings, out: TextIO | None = None, err: TextIO | None = 
 
     if s.save_gains or (info.characterise is not None and info.characterise.changed_to_c is not None):
         oven = info.oven if info.oven is not None else ovens.DEFAULT
-        if s.save_gains and oven.is_generic:
+        # A simulation's gains are never saved, so it needs no oven to save them to (AnalyzeCommand).
+        if s.save_gains and oven.is_generic and info.driver != SIMULATED:
             print("--save-gains needs the oven: give --oven <key> (docs/adding-an-oven.md).", file=err)
             return 1
-        save_characterisation(info, results, folder, oven, s.save_gains, out)
+        save, because = _gains_decision(info, oven, s.save_gains)
+        save_characterisation(info, results, folder, oven, save, out, because)
     return 0

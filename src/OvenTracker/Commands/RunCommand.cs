@@ -634,12 +634,18 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
         return 0;
     }
 
+    /// <summary>Why a simulation's gains aren't saved.</summary>
+    public const string SimulationNotSaved = "A simulation: the gains aren't saved to any oven's profile.";
+
     /// <summary>
     /// Writes characterisation.md and .json beside the run, shows them, and saves the measured gains to the oven's
     /// profile: not for the generic profile (it stands for every oven), and not for a simulation.
     /// </summary>
+    /// <param name="save">Save the gains to the oven's profile.</param>
     /// <param name="ovenFolder">Where oven profiles are saved; the usual folder when null (tests give their own).</param>
-    public static Characterisation SaveCharacterisation(SessionInfo info, IReadOnlyList<PointResult> results, string folder, OvenProfile oven, bool save, string? ovenFolder = null)
+    /// <param name="notSavedBecause">When not saving, why, for the message. A simulation's reason if not given.</param>
+    public static Characterisation SaveCharacterisation(SessionInfo info, IReadOnlyList<PointResult> results, string folder, OvenProfile oven, bool save,
+        string? ovenFolder = null, string? notSavedBecause = null)
     {
         var ch = Characterisation.From(info, results);
         var md = ch.Markdown(info);
@@ -651,7 +657,7 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
         if (!ch.MeasuredAny)
             AnsiConsole.MarkupLine("[yellow]No gain could be measured: no setpoint was finished at both adjustments.[/]");
         else if (!save)
-            AnsiConsole.MarkupLine("[grey]A simulation: the gains aren't saved to any oven's profile.[/]");
+            AnsiConsole.MarkupLine($"[grey]{Markup.Escape(notSavedBecause ?? SimulationNotSaved)}[/]");
         else if (oven.IsGeneric)
             AnsiConsole.MarkupLine("[yellow]The gains aren't saved: the generic profile stands for every oven. Describe yours (docs/adding-an-oven.md), " +
                                    "then save them with [bold]oventracker analyze \"" + Markup.Escape(folder) + "\" --oven <yours> --save-gains[/].[/]");

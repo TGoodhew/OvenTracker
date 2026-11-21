@@ -54,6 +54,11 @@ def minutes_text(minutes: float) -> str:
     return f"{fixed(net_floor(minutes / 60), 0)} h {fixed(math.fmod(minutes, 60), 0)} min"
 
 
+def in_about(minutes: float) -> str:
+    """ResetWaiter.InAbout: "in about 12 min", or "in under a minute" (not "in about under a minute")."""
+    return "in under a minute" if minutes < 1 else f"in about {minutes_text(minutes)}"
+
+
 def short_time(t: datetime) -> str:
     """DateTime.ToString("t") in the invariant culture, as the C# app (InvariantGlobalization) shows it: 14:05."""
     return t.strftime("%H:%M")
@@ -234,10 +239,13 @@ class ResetWaiter:
             while True:
                 take()
                 current = model.current_c
-                if current is not None and current <= nxt.target_c:
+                # Said (and beeped) once, when it becomes ready, not on every pass while waiting for C.
+                if not ready and current is not None and current <= nxt.target_c:
                     poller.enqueue(lambda m: m.beep())
                     ui.bell()
-                    plain_print(console, f"The oven is ready for {nxt.label} ({f.T(current, 0)}).")
+                    plain_print(
+                        console, f"The oven is ready for {nxt.label} ({f.T(current, 0)})." + ("" if auto_carry_on else " Press C to carry on.")
+                    )
                     if auto_carry_on:
                         return ResetOutcome.Ready
                     ready = True
@@ -253,10 +261,10 @@ class ResetWaiter:
                 if shown is not None and (
                     last_line is None or datetime.now(timezone.utc) - last_line >= timedelta(minutes=1) or model.state != last_state
                 ):
-                    e = model.time_until(nxt.target_c)
-                    eta = f"ready in about {minutes_text(e / 60)}" if e is not None else "learning how fast it cools"
+                    e = None if ready else model.time_until(nxt.target_c)
+                    eta = "ready" if ready else f"ready {in_about(e / 60)}" if e is not None else "learning how fast it cools"
                     ce = model.time_until(cold.target_c)
-                    cold_eta = f"; cold in about {minutes_text(ce / 60)}" if ce is not None else ""
+                    cold_eta = f"; cold {in_about(ce / 60)}" if ce is not None else ""
                     silent = (
                         f"  {silence_watch.message(poller.silent_for, self._apo)}"
                         if poller.silent_for >= silence_watch.DEFAULT_THRESHOLD

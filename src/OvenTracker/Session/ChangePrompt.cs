@@ -73,7 +73,7 @@ public sealed class ChangePrompt(MeterPoller poller, RunRecorder recorder, UnitF
             var rows = new List<IRenderable>();
             if (done is not null) rows.Add(new Markup($"[green]{Markup.Escape(done)}[/]"));
             rows.Add(new Markup($"[bold]{Markup.Escape(heading)}[/]"));
-            foreach (var line in big) rows.Add(new FigletText(line.Replace("°", "")).Color(Color.Orange1));
+            foreach (var line in big) rows.Add(new FigletText(ForFiglet(line)).Color(Color.Orange1));
             rows.Add(new Markup((poller.LastCelsius is { } c ? $"The oven is at [bold]{Markup.Escape(f.T(c, 0))}[/] now.   " : "") +
                                 (BatteryText.Markup(poller.BatteryPercent) is { } battery ? $"Meter battery {battery}.   " : "") +
                                 $"[grey]Waiting {Markup.Escape(Waited(waited))}" +
@@ -135,4 +135,13 @@ public sealed class ChangePrompt(MeterPoller poller, RunRecorder recorder, UnitF
     static string Waited(TimeSpan t) => t.TotalMinutes >= 1
         ? $"{Math.Floor(t.TotalMinutes).ToString("F0", Inv)} min"
         : $"{Math.Floor(t.TotalSeconds).ToString("F0", Inv)} s";
+
+    /// <summary>
+    /// Text the big (FigletText) font can draw. It has only ASCII, so a "−10 °F" would lose its minus sign and show
+    /// as "10 F", the opposite of what to do: minus signs and dashes become "-", "°" is dropped, and anything else
+    /// it can't draw is left out.
+    /// </summary>
+    public static string ForFiglet(string text) =>
+        new string(text.Replace('\u2212', '-').Replace('\u2013', '-').Replace('\u2014', '-').Replace("°", "")
+            .Where(ch => ch is >= ' ' and <= '~').ToArray());
 }

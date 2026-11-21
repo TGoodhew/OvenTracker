@@ -127,11 +127,12 @@ public sealed class ResetWaiter(MeterPoller poller, RunRecorder recorder, UnitFo
                     start ??= r.Time;
                     if (r is { Status: Meter.ReadingStatus.Ok, Celsius: { } c }) model.Add((r.Time - start.Value).TotalSeconds, c);
                 }
-                if (model.CurrentC is { } current && current <= next.TargetC)
+                // Said (and beeped) once, when it becomes ready, not on every pass while waiting for C.
+                if (!ready && model.CurrentC is { } current && current <= next.TargetC)
                 {
                     poller.Enqueue(m => m.Beep());
                     ConsoleCaps.Bell();
-                    AnsiConsole.WriteLine($"The oven is ready for {next.Label} ({f.T(current, 0)}).");
+                    AnsiConsole.WriteLine($"The oven is ready for {next.Label} ({f.T(current, 0)})." + (autoCarryOn ? "" : " Press C to carry on."));
                     if (autoCarryOn) return ResetOutcome.Ready;
                     ready = true;
                 }
@@ -144,8 +145,8 @@ public sealed class ResetWaiter(MeterPoller poller, RunRecorder recorder, UnitFo
                 }
                 if (model.CurrentC is { } shown && (DateTimeOffset.UtcNow - lastLine >= TimeSpan.FromMinutes(1) || model.State != lastState))
                 {
-                    var eta = model.TimeUntil(next.TargetC) is { } e ? $"ready in about {Minutes(e.TotalMinutes)}" : "learning how fast it cools";
-                    var coldEta = model.TimeUntil(cold.TargetC) is { } ce ? $"; cold in about {Minutes(ce.TotalMinutes)}" : "";
+                    var eta = ready ? "ready" : model.TimeUntil(next.TargetC) is { } e ? $"ready {InAbout(e.TotalMinutes)}" : "learning how fast it cools";
+                    var coldEta = model.TimeUntil(cold.TargetC) is { } ce ? $"; cold {InAbout(ce.TotalMinutes)}" : "";
                     var silent = poller.SilentFor >= SilenceWatch.DefaultThreshold ? $"  {SilenceWatch.Message(poller.SilentFor, autoPowerOff)}" : "";
                     var battery = BatteryText.Plain(poller.BatteryPercent) is { } b ? $" Meter {b}." : "";
                     AnsiConsole.WriteLine($"{f.T(shown, 0)}, {model.State.ToString().ToLowerInvariant()}: {eta}{coldEta}.{battery}{silent}");
@@ -208,6 +209,9 @@ public sealed class ResetWaiter(MeterPoller poller, RunRecorder recorder, UnitFo
             rows.Insert(1, new Markup($"[bold red]{Markup.Escape(SilenceWatch.Message(poller.SilentFor, autoPowerOff))}[/]"));
         return new Rows(rows);
     }
+
+    /// <summary>"in about 12 min", or "in under a minute" (not "in about under a minute").</summary>
+    public static string InAbout(double minutes) => minutes < 1 ? "in under a minute" : $"in about {Minutes(minutes)}";
 
     static string Minutes(double minutes) => minutes switch
     {
