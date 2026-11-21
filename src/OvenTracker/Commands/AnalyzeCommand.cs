@@ -26,6 +26,10 @@ public sealed class AnalyzeSettings : SharedSettings
     [CommandOption("--min-cycles <N>")]
     public int? MinCycles { get; set; }
 
+    [CommandOption("-o|--out <DIR>")]
+    [Description("Folder for the report and results. Default: the (latest) run's own folder.")]
+    public string? Out { get; set; }
+
     [CommandOption("--save-gains")]
     [Description("Save the gains measured by these runs (the same setpoints at different adjustments) to the oven's profile (--oven), so later runs use them.")]
     public bool SaveGains { get; set; }
@@ -132,9 +136,15 @@ public sealed class AnalyzeCommand : Command<AnalyzeSettings>
         var report = new Report(info, results);
         ConsoleReport.Full(report);
         var latest = runs.OrderBy(r => r.Info.Started).Last().Folder;
-        var output = Path.Combine(latest, runs.Count == 1 ? "report-reanalysed.md" : "report-combined.md");
+        var folder = s.Out ?? latest;
+        Directory.CreateDirectory(folder);
+        var suffix = runs.Count == 1 ? "reanalysed" : "combined";
+        var output = Path.Combine(folder, $"report-{suffix}.md");
         File.WriteAllText(output, report.Markdown());
-        AnsiConsole.MarkupLine($"\nWrote {Markup.Escape(output)}.");
+        // The same shape as a run's results.json, so the two (and the Python port's) can be compared.
+        var json = Path.Combine(folder, $"results-{suffix}.json");
+        File.WriteAllText(json, RunRecorder.ResultsJson(info, results));
+        AnsiConsole.MarkupLine($"\nWrote {Markup.Escape(output)} and {Markup.Escape(Path.GetFileName(json))}.");
 
         if (s.SaveGains || info.Characterise is { ChangedToC: not null })
         {
@@ -144,7 +154,7 @@ public sealed class AnalyzeCommand : Command<AnalyzeSettings>
                 AnsiConsole.MarkupLine("[red]--save-gains needs the oven: give --oven <key> (docs/adding-an-oven.md).[/]");
                 return 1;
             }
-            RunCommand.SaveCharacterisation(info, results, latest, oven, save: s.SaveGains);
+            RunCommand.SaveCharacterisation(info, results, folder, oven, save: s.SaveGains);
         }
         return 0;
     }

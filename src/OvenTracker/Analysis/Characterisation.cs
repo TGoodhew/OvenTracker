@@ -77,7 +77,8 @@ public sealed record Characterisation(
         var sb = new StringBuilder();
         sb.AppendLine($"# Characterisation: {info.Oven?.Name ?? "the oven"}");
         sb.AppendLine();
-        sb.AppendLine($"Measured {info.Started.ToLocalTime():yyyy-MM-dd} with {info.Meter}" +
+        // The date as recorded (in the offset it was saved with), so the file reads the same on any PC.
+        sb.AppendLine($"Measured {info.Started.ToString("yyyy-MM-dd", Inv)} with {info.Meter}" +
                       (info.Sensor is { } s ? $" and a {s.Name}" : "") + ".");
         sb.AppendLine();
         sb.AppendLine("## How far the adjustment moves the oven");

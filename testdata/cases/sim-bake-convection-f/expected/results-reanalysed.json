@@ -1,0 +1,227 @@
+{
+  "session": {
+    "appVersion": "1.0.0",
+    "started": "2026-11-20T15:57:56.3663497-08:00",
+    "meter": "OvenTracker simulated meter",
+    "location": "simulator",
+    "unit": "Fahrenheit",
+    "toleranceC": 8.333333333333334,
+    "options": {
+      "precisionC": 1.1111111111111112,
+      "minCycles": 4,
+      "minBlocks": 5,
+      "blockMinutes": 3,
+      "minHysteresisC": 1,
+      "smoothingSeconds": 5,
+      "maxPointMinutes": 120,
+      "noCycleMinutes": 15,
+      "flatWindowMinutes": 10,
+      "flatSlopeCPerMinute": 0.15,
+      "driftHorizonMinutes": 30,
+      "defaultCycleMinutes": 6
+    },
+    "plan": [
+      {
+        "index": 1,
+        "mode": "Bake",
+        "setpointC": 176.66666666666666
+      },
+      {
+        "index": 2,
+        "mode": "Bake",
+        "setpointC": 204.44444444444446
+      },
+      {
+        "index": 3,
+        "mode": "Convection",
+        "setpointC": 176.66666666666666
+      },
+      {
+        "index": 4,
+        "mode": "Convection",
+        "setpointC": 204.44444444444446
+      }
+    ],
+    "driver": "simulated",
+    "identity": {
+      "manufacturer": "OvenTracker",
+      "model": "simulated meter",
+      "serial": "SIM00001",
+      "firmware": "0.00"
+    },
+    "sensor": {
+      "name": "type K thermocouple",
+      "limitC": 2.2,
+      "limitFraction": 0.0075,
+      "limitsAdd": false,
+      "isGenericType": true
+    },
+    "adjustmentC": 0,
+    "adjust": {
+      "stepC": 0.5555555555555556,
+      "rangeC": 19.444444444444443,
+      "objective": "Balanced",
+      "model": "Shift",
+      "sharedAcrossModes": true
+    },
+    "ambientC": 22,
+    "sittings": [
+      "2026-11-20T15:57:56.3663497-08:00"
+    ],
+    "oven": {
+      "key": "generic",
+      "name": "an oven",
+      "adjustStepC": 0.5555555555555556,
+      "adjustRangeC": 19.444444444444443,
+      "sharedAdjustment": true,
+      "howToRead": [
+        "Look in the oven\u0027s manual for its temperature offset (or calibration, or thermostat adjustment) setting, and how to see what it\u0027s set to."
+      ],
+      "howToChange": [
+        "Look in the oven\u0027s manual for its temperature offset (or calibration, or thermostat adjustment) setting, and how to change it."
+      ],
+      "notes": [
+        "Most electronic ovens have an adjustment of up to \u00B130 or \u00B135 \u00B0F in 1\u00B0 steps. Describe yours with --oven (docs/adding-an-oven.md) and the app uses its own."
+      ],
+      "isGeneric": true,
+      "defaultMaxMinutes": 120
+    }
+  },
+  "results": [
+    {
+      "point": {
+        "index": 1,
+        "mode": "Bake",
+        "setpointC": 176.66666666666666
+      },
+      "metrics": {
+        "setpointC": 176.667,
+        "reason": "Converged",
+        "kind": "Cycle",
+        "units": 4,
+        "discardedUnits": 5,
+        "meanC": 181.02722701227603,
+        "halfWidthC": 0.1707577577210755,
+        "stdDevC": 0.10732731472097769,
+        "driftCPerHour": 1.3884948848500285,
+        "swingC": 18.85000000000001,
+        "minC": 171.5,
+        "maxC": 190.6,
+        "cycleMinutes": 2.933333333333333,
+        "startC": 22,
+        "timeToSetpointMinutes": 21.083333333333332,
+        "overshootC": 8.332999999999998,
+        "settleMinutes": 39.28333333333333,
+        "measureMinutes": 11.733333333333333,
+        "totalMinutes": 51.2,
+        "precisionTargetC": 1.1111111111111112,
+        "longestGapSeconds": 1,
+        "offsetC": 4.360227012276027,
+        "metPrecision": true
+      },
+      "afterReset": false,
+      "startedWarm": false
+    },
+    {
+      "point": {
+        "index": 2,
+        "mode": "Bake",
+        "setpointC": 204.44444444444446
+      },
+      "metrics": {
+        "setpointC": 204.444,
+        "reason": "Converged",
+        "kind": "Cycle",
+        "units": 4,
+        "discardedUnits": 5,
+        "meanC": 208.7337283604864,
+        "halfWidthC": 0.09300541743616159,
+        "stdDevC": 0.058457207690862094,
+        "driftCPerHour": 0.23611807051564976,
+        "swingC": 18.724999999999994,
+        "minC": 199.3,
+        "maxC": 218.3,
+        "cycleMinutes": 2.9458333333333333,
+        "startC": 175.6,
+        "timeToSetpointMinutes": 2.2333333333333334,
+        "overshootC": 9.656000000000006,
+        "settleMinutes": 20.55,
+        "measureMinutes": 11.783333333333333,
+        "totalMinutes": 32.53333333333333,
+        "precisionTargetC": 1.1111111111111112,
+        "longestGapSeconds": 1,
+        "offsetC": 4.289728360486407,
+        "metPrecision": true
+      },
+      "afterReset": false,
+      "startedWarm": false
+    },
+    {
+      "point": {
+        "index": 3,
+        "mode": "Convection",
+        "setpointC": 176.66666666666666
+      },
+      "metrics": {
+        "setpointC": 176.667,
+        "reason": "Converged",
+        "kind": "Cycle",
+        "units": 4,
+        "discardedUnits": 2,
+        "meanC": 172.09011250853328,
+        "halfWidthC": 0.11295929626928829,
+        "stdDevC": 0.07099892914474437,
+        "driftCPerHour": -1.0304364895997487,
+        "swingC": 9.675000000000011,
+        "minC": 167.2,
+        "maxC": 177,
+        "cycleMinutes": 2.308333333333333,
+        "startC": 203.2,
+        "timeToSetpointMinutes": 4,
+        "settleMinutes": 13.3,
+        "measureMinutes": 9.233333333333333,
+        "totalMinutes": 22.766666666666666,
+        "precisionTargetC": 1.1111111111111112,
+        "longestGapSeconds": 1,
+        "offsetC": -4.576887491466721,
+        "metPrecision": true
+      },
+      "afterReset": false,
+      "startedWarm": false
+    },
+    {
+      "point": {
+        "index": 4,
+        "mode": "Convection",
+        "setpointC": 204.44444444444446
+      },
+      "metrics": {
+        "setpointC": 204.444,
+        "reason": "Converged",
+        "kind": "Cycle",
+        "units": 4,
+        "discardedUnits": 2,
+        "meanC": 199.38897656009044,
+        "halfWidthC": 0.1754631744807445,
+        "stdDevC": 0.11028483625439629,
+        "driftCPerHour": 1.443893474817145,
+        "swingC": 9.675000000000004,
+        "minC": 194.5,
+        "maxC": 204.3,
+        "cycleMinutes": 2.3208333333333333,
+        "startC": 169.7,
+        "timeToSetpointMinutes": 6.05,
+        "overshootC": -1.9439999999999884,
+        "settleMinutes": 11.833333333333334,
+        "measureMinutes": 9.283333333333333,
+        "totalMinutes": 21.35,
+        "precisionTargetC": 1.1111111111111112,
+        "longestGapSeconds": 1,
+        "offsetC": -5.055023439909547,
+        "metPrecision": true
+      },
+      "afterReset": false,
+      "startedWarm": false
+    }
+  ]
+}

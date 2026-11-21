@@ -1,0 +1,183 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "spec/session.schema.json",
+  "title": "OvenTracker session.json",
+  "description": "How a run was set up (SessionInfo in src/OvenTracker/Session/Recording.cs). Temperatures and differences are in °C. Properties whose value is null are left out, never written as null. See spec/recording.md.",
+  "$ref": "#/$defs/sessionInfo",
+  "$defs": {
+    "timestamp": {
+      "description": "A .NET DateTimeOffset: ISO 8601 with the PC's local offset and up to seven fractional digits, e.g. 2026-11-20T11:18:06.9757259-08:00.",
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,7})?(Z|[+-]\\d{2}:\\d{2})$"
+    },
+    "unit": {
+      "description": "The oven's unit (TempUnit).",
+      "enum": ["Fahrenheit", "Celsius"]
+    },
+    "mode": {
+      "description": "An oven mode (OvenMode).",
+      "enum": ["Bake", "Convection"]
+    },
+    "modeKeys": {
+      "description": "The property names of an object keyed by oven mode.",
+      "enum": ["Bake", "Convection"]
+    },
+    "sessionInfo": {
+      "type": "object",
+      "required": ["appVersion", "started", "meter", "location", "unit", "toleranceC", "options", "plan"],
+      "additionalProperties": false,
+      "properties": {
+        "appVersion": { "type": "string", "description": "The app's version." },
+        "started": { "$ref": "#/$defs/timestamp", "description": "When the run (its first sitting) started." },
+        "meter": { "type": "string", "description": "The meter's make and model, for people." },
+        "location": { "type": "string", "description": "Where the meter was, e.g. COM5." },
+        "unit": { "$ref": "#/$defs/unit" },
+        "toleranceC": { "type": "number", "minimum": 0, "description": "The tolerance a setpoint is judged against (±, °C)." },
+        "options": { "$ref": "#/$defs/analysisOptions" },
+        "plan": { "type": "array", "items": { "$ref": "#/$defs/testPoint" }, "description": "The setpoints, in order." },
+        "driver": { "type": "string", "description": "The meter driver's name, e.g. u1253b, 34401a, simulated." },
+        "identity": { "$ref": "#/$defs/meterIdentity" },
+        "sensor": { "$ref": "#/$defs/sensor" },
+        "adjustmentC": { "type": "number", "description": "The oven's thermostat adjustment during the run (°C)." },
+        "adjust": { "$ref": "#/$defs/adjustmentOptions" },
+        "ambientC": { "type": "number", "description": "Room temperature (°C)." },
+        "sittings": { "type": "array", "items": { "$ref": "#/$defs/timestamp" }, "description": "When each sitting started: the first, then each resume." },
+        "oven": { "$ref": "#/$defs/ovenProfile" },
+        "characterise": { "$ref": "#/$defs/characteriseInfo" }
+      }
+    },
+    "testPoint": {
+      "description": "One setpoint (TestPoint).",
+      "type": "object",
+      "required": ["index", "mode", "setpointC"],
+      "additionalProperties": false,
+      "properties": {
+        "index": { "type": "integer", "minimum": 1, "description": "1, 2, 3… in plan order: the point column in readings.csv." },
+        "mode": { "$ref": "#/$defs/mode" },
+        "setpointC": { "type": "number", "description": "The setting (°C)." },
+        "adjustmentC": { "type": "number", "description": "The adjustment for this point, when it differs by design from the session's (°C)." }
+      }
+    },
+    "analysisOptions": {
+      "description": "The analysis options (AnalysisOptions). The C# writes every field.",
+      "type": "object",
+      "required": [
+        "precisionC", "minCycles", "minBlocks", "blockMinutes", "minHysteresisC", "smoothingSeconds",
+        "maxPointMinutes", "noCycleMinutes", "flatWindowMinutes", "flatSlopeCPerMinute",
+        "driftHorizonMinutes", "defaultCycleMinutes"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "precisionC": { "type": "number", "exclusiveMinimum": 0, "default": 1.0 },
+        "minCycles": { "type": "integer", "minimum": 1, "default": 4 },
+        "minBlocks": { "type": "integer", "minimum": 1, "default": 5 },
+        "blockMinutes": { "type": "number", "exclusiveMinimum": 0, "default": 3 },
+        "minHysteresisC": { "type": "number", "minimum": 0, "default": 1.0 },
+        "smoothingSeconds": { "type": "number", "minimum": 0, "default": 5 },
+        "maxPointMinutes": { "type": "number", "exclusiveMinimum": 0, "default": 120 },
+        "noCycleMinutes": { "type": "number", "minimum": 0, "default": 15 },
+        "flatWindowMinutes": { "type": "number", "minimum": 0, "default": 10 },
+        "flatSlopeCPerMinute": { "type": "number", "minimum": 0, "default": 0.15 },
+        "driftHorizonMinutes": { "type": "number", "minimum": 0, "default": 30 },
+        "defaultCycleMinutes": { "type": "number", "exclusiveMinimum": 0, "default": 6 }
+      }
+    },
+    "meterIdentity": {
+      "description": "What the meter said it was (MeterIdentity).",
+      "type": "object",
+      "required": ["manufacturer", "model", "serial", "firmware"],
+      "additionalProperties": false,
+      "properties": {
+        "manufacturer": { "type": "string" },
+        "model": { "type": "string" },
+        "serial": { "type": "string" },
+        "firmware": { "type": "string" }
+      }
+    },
+    "sensor": {
+      "description": "A temperature sensor and its standard tolerance (Sensor).",
+      "type": "object",
+      "required": ["name", "limitC", "limitFraction", "limitsAdd", "isGenericType"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "limitC": { "type": "number", "minimum": 0, "description": "The fixed part of the tolerance (°C)." },
+        "limitFraction": { "type": "number", "minimum": 0, "description": "The proportional part, a fraction of the temperature in °C." },
+        "limitsAdd": { "type": "boolean", "description": "True: the two parts are added. False: the greater of the two." },
+        "maxC": { "type": "number", "description": "The highest temperature the probe is rated for (°C)." },
+        "isGenericType": { "type": "boolean", "description": "Computed: the name starts with \"type \". Written, not read." }
+      }
+    },
+    "adjustmentOptions": {
+      "description": "How to work out the best adjustment (AdjustmentOptions).",
+      "type": "object",
+      "required": ["stepC", "rangeC", "objective", "model", "sharedAcrossModes"],
+      "additionalProperties": false,
+      "properties": {
+        "stepC": { "type": "number", "exclusiveMinimum": 0 },
+        "rangeC": { "type": "number", "exclusiveMinimum": 0 },
+        "objective": { "enum": ["Balanced", "Minimax"] },
+        "favourC": { "type": "number", "description": "Make the oven right at this temperature (°C)." },
+        "model": { "enum": ["Shift", "Gain"] },
+        "sharedAcrossModes": { "type": "boolean" },
+        "knownGains": {
+          "description": "Gains measured on this oven before, by mode.",
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/modeKeys" },
+          "additionalProperties": { "type": "number" }
+        }
+      }
+    },
+    "measuredGain": {
+      "description": "A gain measured by characterise (MeasuredGain).",
+      "type": "object",
+      "required": ["gain", "measuredOn"],
+      "additionalProperties": false,
+      "properties": {
+        "gain": { "type": "number" },
+        "halfWidth": { "type": "number", "minimum": 0 },
+        "measuredOn": { "$ref": "#/$defs/timestamp" }
+      }
+    },
+    "ovenProfile": {
+      "description": "The oven's profile (OvenProfile in src/OvenTracker/Ovens/OvenProfile.cs).",
+      "type": "object",
+      "required": ["key", "name", "adjustStepC", "adjustRangeC", "sharedAdjustment", "isGeneric", "defaultMaxMinutes"],
+      "additionalProperties": false,
+      "properties": {
+        "key": { "type": "string" },
+        "name": { "type": "string" },
+        "adjustStepC": { "type": "number" },
+        "adjustRangeC": { "type": "number" },
+        "sharedAdjustment": { "type": "boolean" },
+        "howToRead": { "type": "array", "items": { "type": "string" } },
+        "howToChange": { "type": "array", "items": { "type": "string" } },
+        "convectionConversionC": { "type": "number" },
+        "howToTurnOffConversion": { "type": "array", "items": { "type": "string" } },
+        "typicalCycleMinutes": { "type": "number" },
+        "gains": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/modeKeys" },
+          "additionalProperties": { "$ref": "#/$defs/measuredGain" }
+        },
+        "notes": { "type": "array", "items": { "type": "string" } },
+        "source": { "type": "string" },
+        "isGeneric": { "type": "boolean", "description": "Computed: key is \"generic\". Written, not read." },
+        "defaultMaxMinutes": { "type": "number", "description": "Computed: max(120, 60 + 6·typicalCycleMinutes), or 120. Written, not read." }
+      }
+    },
+    "characteriseInfo": {
+      "description": "A characterise run's plan (CharacteriseInfo).",
+      "type": "object",
+      "required": ["stepC"],
+      "additionalProperties": false,
+      "properties": {
+        "stepC": { "type": "number", "exclusiveMinimum": 0 },
+        "fromC": { "type": "number" },
+        "changedToC": { "type": "number" },
+        "changedAt": { "$ref": "#/$defs/timestamp" }
+      }
+    }
+  }
+}

@@ -1,0 +1,34 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "oventracker"
+# The release workflow rewrites this line with the release version (the C# app's <Version>).
+version = "1.0.0"
+description = "OvenTracker's analysis in Python: re-analyse a recorded oven run and write the same report and results as the C# app."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "The Schnauzer Group LLC" }]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering",
+]
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[project.scripts]
+oventracker-py = "oventracker.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/TGoodhew/OvenTracker"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/oventracker"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -224,7 +224,7 @@ or to `--out`:
   far to trust it.
 - `results.json`: the same numbers, machine-readable (°C).
 - `readings.csv`: every reading as it arrived, flushed line by line, with the events needed to replay
-  the analysis. `analyze` re-runs it, for example with a different tolerance.
+  the analysis. `analyze` re-runs it, for example with a different tolerance, and writes `report-reanalysed.md` and `results-reanalysed.json` (`-combined` for several runs) into the run's folder, or into `--out <folder>`.
 
 A setpoint is judged **Accurate** when its mean and its ±95 % interval are within the tolerance (±15 °F /
 ±8 °C by default, `--tolerance`), **Out of tolerance** when they are clearly outside it, and
@@ -389,6 +389,28 @@ asks (User's Guide, p. 160). It then checks that `*IDN?` names a 34401A before c
 `CONF?` every 30 readings, in case someone pressed Local and changed the function. At the end it gives the
 front panel back.
 
+## The Python package
+
+`python/` holds a second implementation in Python. It covers the **analysis only** for now: it re-analyses
+saved runs and writes the same results and report as `OvenTracker analyze`. Install it with pip on any
+system, with no .NET needed:
+
+```sh
+pip install ./python                     # or: pipx install ./python
+oventracker-py analyze ~/"Documents/OvenTracker/2026-11-20 1400" --tolerance 10
+```
+
+Use it to analyse runs on a machine without the app, from your own scripts or notebooks
+(`import oventracker`), or to read the method in Python. To measure an oven, use the app itself.
+
+The two implementations are kept aligned by a written specification and shared test data, not by reading
+each other's code. The C# app is the reference:
+- [spec/](spec/README.md) describes the recording formats (with JSON Schemas) and the analysis.
+- `testdata/` holds recorded runs, real and simulated, with the results the analysis must give. Both
+  implementations' tests replay every one, and CI also checks that the two outputs agree.
+- Both carry the same version and are released together. [CHANGELOG.md](CHANGELOG.md) says which
+  implementations have each change.
+
 ## Build
 
 One codebase builds for every system. `build.ps1` needs PowerShell 7 and runs on Windows or Linux:
@@ -412,9 +434,11 @@ ports (WMI on Windows; `/dev` and sysfs on Linux), how port names compare, and w
 saved.
 
 **CI** ([ci.yml](.github/workflows/ci.yml)) builds and tests on Windows and Linux for every push and pull
-request. On Linux it also publishes the app and runs a whole simulated session in a terminal.
+request. On Linux it also publishes the app and runs a whole simulated session in a terminal. It tests the
+Python package on both systems, and checks that the C# and Python analyses agree on every case in
+`testdata/`.
 **Releases** ([release.yml](.github/workflows/release.yml)) build each package on its own system (Windows,
-Linux x64 and Linux ARM64), sign the Windows programs, and publish them with a `SHA256SUMS` file.
+Linux x64 and Linux ARM64), sign the Windows programs, build the Python package, and publish them all with a `SHA256SUMS` file.
 [docs/releasing.md](docs/releasing.md) explains how to make a release and how signing is set up.
 
 ## License

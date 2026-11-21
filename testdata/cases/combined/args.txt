@@ -1,0 +1,3 @@
+# the same setpoints at two adjustments: measures the gain
+runs/sim-bake-c
+runs/sim-bake-c-adj-5

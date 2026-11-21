@@ -1,0 +1,88 @@
+{
+  "appVersion": "1.0.0",
+  "started": "2026-11-20T15:57:56.3663497-08:00",
+  "meter": "OvenTracker simulated meter",
+  "location": "simulator",
+  "unit": "Fahrenheit",
+  "toleranceC": 8.333333333333334,
+  "options": {
+    "precisionC": 1.1111111111111112,
+    "minCycles": 4,
+    "minBlocks": 5,
+    "blockMinutes": 3,
+    "minHysteresisC": 1,
+    "smoothingSeconds": 5,
+    "maxPointMinutes": 120,
+    "noCycleMinutes": 15,
+    "flatWindowMinutes": 10,
+    "flatSlopeCPerMinute": 0.15,
+    "driftHorizonMinutes": 30,
+    "defaultCycleMinutes": 6
+  },
+  "plan": [
+    {
+      "index": 1,
+      "mode": "Bake",
+      "setpointC": 176.66666666666666
+    },
+    {
+      "index": 2,
+      "mode": "Bake",
+      "setpointC": 204.44444444444446
+    },
+    {
+      "index": 3,
+      "mode": "Convection",
+      "setpointC": 176.66666666666666
+    },
+    {
+      "index": 4,
+      "mode": "Convection",
+      "setpointC": 204.44444444444446
+    }
+  ],
+  "driver": "simulated",
+  "identity": {
+    "manufacturer": "OvenTracker",
+    "model": "simulated meter",
+    "serial": "SIM00001",
+    "firmware": "0.00"
+  },
+  "sensor": {
+    "name": "type K thermocouple",
+    "limitC": 2.2,
+    "limitFraction": 0.0075,
+    "limitsAdd": false,
+    "isGenericType": true
+  },
+  "adjustmentC": 0,
+  "adjust": {
+    "stepC": 0.5555555555555556,
+    "rangeC": 19.444444444444443,
+    "objective": "Balanced",
+    "model": "Shift",
+    "sharedAcrossModes": true
+  },
+  "ambientC": 22,
+  "sittings": [
+    "2026-11-20T15:57:56.3663497-08:00"
+  ],
+  "oven": {
+    "key": "generic",
+    "name": "an oven",
+    "adjustStepC": 0.5555555555555556,
+    "adjustRangeC": 19.444444444444443,
+    "sharedAdjustment": true,
+    "howToRead": [
+      "Look in the oven\u0027s manual for its temperature offset (or calibration, or thermostat adjustment) setting, and how to see what it\u0027s set to."
+    ],
+    "howToChange": [
+      "Look in the oven\u0027s manual for its temperature offset (or calibration, or thermostat adjustment) setting, and how to change it."
+    ],
+    "notes": [
+      "Most electronic ovens have an adjustment of up to \u00B130 or \u00B135 \u00B0F in 1\u00B0 steps. Describe yours with --oven (docs/adding-an-oven.md) and the app uses its own."
+    ],
+    "isGeneric": true,
+    "defaultMaxMinutes": 120
+  }
+}

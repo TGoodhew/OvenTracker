@@ -1,0 +1,8 @@
+# a looser precision and tolerance, and the Fluke probe the run was made without
+runs/real-2026-11-20-1118
+--precision
+3
+--tolerance
+10
+--probe
+80bk-a

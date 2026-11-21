@@ -1,0 +1,69 @@
+{
+  "modes": [
+    {
+      "mode": "Bake",
+      "gain": {
+        "gain": 0.8992953791959358,
+        "source": "Measured",
+        "halfWidth": 0.033781007041745935
+      },
+      "slopePerDegree": -0.005435033105808911,
+      "curved": false,
+      "setpoints": 3
+    }
+  ],
+  "repeats": [],
+  "recommendation": {
+    "changeC": 0.5555555555555556,
+    "currentC": -5.555555555555555,
+    "newSettingC": -5,
+    "clamped": false,
+    "gain": 0.8992953791959358,
+    "gainMeasured": true,
+    "gainHalfWidthC": 0.033781007041745935,
+    "options": {
+      "stepC": 0.5555555555555556,
+      "rangeC": 19.444444444444443,
+      "objective": "Balanced",
+      "model": "Shift",
+      "sharedAcrossModes": true
+    },
+    "mode": "Bake",
+    "residuals": [
+      {
+        "mode": "Bake",
+        "setpointC": 162.77777777777777,
+        "nowC": -0.49613501625210477,
+        "afterC": 0.0034735277456373614,
+        "halfWidthC": 0.12083718170549738
+      },
+      {
+        "mode": "Bake",
+        "setpointC": 190.55555555555554,
+        "nowC": -0.5868773118986192,
+        "afterC": -0.08726876790087712,
+        "halfWidthC": 0.11387420398200854
+      },
+      {
+        "mode": "Bake",
+        "setpointC": 218.33333333333334,
+        "nowC": -0.7980812999081555,
+        "afterC": -0.29847275591041333,
+        "halfWidthC": 0.14359405696295466
+      }
+    ],
+    "dialCorrections": [],
+    "addSetpointsC": [],
+    "curved": false,
+    "gainFromProfile": false,
+    "gains": {
+      "Bake": {
+        "gain": 0.8992953791959358,
+        "source": "Measured",
+        "halfWidth": 0.033781007041745935
+      }
+    },
+    "worstAfterC": 0.29847275591041333
+  },
+  "measuredAny": true
+}

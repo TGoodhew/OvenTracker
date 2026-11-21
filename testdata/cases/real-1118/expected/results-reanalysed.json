@@ -1,0 +1,99 @@
+{
+  "session": {
+    "appVersion": "1.0.0",
+    "started": "2026-11-20T11:18:06.9757259-08:00",
+    "meter": "Agilent Technologies U1253B",
+    "location": "COM5",
+    "unit": "Fahrenheit",
+    "toleranceC": 8.333333333333334,
+    "options": {
+      "precisionC": 1.1111111111111112,
+      "minCycles": 4,
+      "minBlocks": 5,
+      "blockMinutes": 3,
+      "minHysteresisC": 1,
+      "smoothingSeconds": 5,
+      "maxPointMinutes": 120,
+      "noCycleMinutes": 15,
+      "flatWindowMinutes": 10,
+      "flatSlopeCPerMinute": 0.15,
+      "driftHorizonMinutes": 30,
+      "defaultCycleMinutes": 6
+    },
+    "plan": [
+      {
+        "index": 1,
+        "mode": "Bake",
+        "setpointC": 176.66666666666666
+      },
+      {
+        "index": 2,
+        "mode": "Convection",
+        "setpointC": 176.66666666666666
+      },
+      {
+        "index": 3,
+        "mode": "Bake",
+        "setpointC": 204.44444444444446
+      },
+      {
+        "index": 4,
+        "mode": "Convection",
+        "setpointC": 204.44444444444446
+      },
+      {
+        "index": 5,
+        "mode": "Bake",
+        "setpointC": 232.22222222222223
+      },
+      {
+        "index": 6,
+        "mode": "Convection",
+        "setpointC": 232.22222222222223
+      }
+    ],
+    "adjust": {
+      "stepC": 0.5555555555555556,
+      "rangeC": 19.444444444444443,
+      "objective": "Balanced",
+      "model": "Shift",
+      "sharedAcrossModes": true
+    }
+  },
+  "results": [
+    {
+      "point": {
+        "index": 1,
+        "mode": "Bake",
+        "setpointC": 176.66666666666666
+      },
+      "metrics": {
+        "setpointC": 176.667,
+        "reason": "Aborted",
+        "kind": "Cycle",
+        "units": 2,
+        "discardedUnits": 0,
+        "meanC": 186.03411791634343,
+        "halfWidthC": 12.442010657981996,
+        "stdDevC": 1.3848308055807286,
+        "swingC": 10.11,
+        "minC": 179.64,
+        "maxC": 190.26,
+        "cycleMinutes": 20.004166666666666,
+        "startC": 180.81,
+        "timeToSetpointMinutes": 9.443333333333333,
+        "settleMinutes": 20.065,
+        "measureMinutes": 40.00833333333333,
+        "totalMinutes": 61.45333333333333,
+        "preheatSignalMinutes": 1.9683333333333333,
+        "preheatSignalC": 180.24499999999998,
+        "precisionTargetC": 1.1111111111111112,
+        "longestGapSeconds": 983.5,
+        "offsetC": 9.367117916343432,
+        "metPrecision": false
+      },
+      "afterReset": false,
+      "startedWarm": false
+    }
+  ]
+}

@@ -7,6 +7,9 @@ name: Release
 #   OvenTracker-<version>-linux-x64-self-contained.tar.gz
 #   OvenTracker-<version>-linux-arm64.tar.gz             Linux on 64-bit ARM, e.g. a Raspberry Pi 4 or 5
 #   OvenTracker-<version>-linux-arm64-self-contained.tar.gz
+#   oventracker-<version>-py3-none-any.whl, oventracker-<version>.tar.gz
+#                                                        The Python package (the analysis), also published to
+#                                                        PyPI when the repository variable PYPI_PUBLISH is true
 #
 # The Windows programs are signed with Azure Artifact Signing, and a release is never made with unsigned ones:
 # the Windows job fails, and nothing is published, until the 'release' environment is set up as
@@ -126,9 +129,34 @@ jobs:
         shell: pwsh
         run: az logout; az account clear
 
+  python:
+    name: Python package
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Set the version, test and build
+        shell: bash
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          sed -i -E "s/^version = \".*\"/version = \"$VERSION\"/" python/pyproject.toml
+          grep -q "^version = \"$VERSION\"" python/pyproject.toml || { echo "::error::couldn't set the version in python/pyproject.toml"; exit 1; }
+          python -m pip install build "./python[test]"
+          python -m pytest python/tests -q
+          python -m build python --outdir dist-python
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-python
+          path: dist-python/*
+          if-no-files-found: error
+
   publish:
     name: Publish the release
-    needs: [version, linux, windows]
+    needs: [version, linux, windows, python]
     runs-on: ubuntu-latest
     permissions:
       contents: write # gh release create, with the workflow's own token
@@ -149,3 +177,20 @@ jobs:
           gh release create "v$VERSION" dist/* \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --title "OvenTracker $VERSION" --generate-notes
+
+  pypi:
+    name: Publish to PyPI
+    needs: [version, publish]
+    # PyPI's trusted publishing: PyPI trusts this workflow in the 'pypi' environment, so no token is stored.
+    # Off until it's set up on PyPI and the repository variable PYPI_PUBLISH is 'true' (docs/releasing.md).
+    if: vars.PYPI_PUBLISH == 'true'
+    environment: pypi
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-python
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1

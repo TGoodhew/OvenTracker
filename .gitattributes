@@ -21,3 +21,7 @@
 *.ico binary
 *.zip binary
 *.gz binary
+
+# Shared test data: recordings and expected outputs, byte for byte, never converted (spec/testdata.md).
+testdata/runs/** -text
+testdata/cases/**/expected/** -text

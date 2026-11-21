@@ -221,9 +221,10 @@ public sealed class Report(SessionInfo info, IReadOnlyList<PointResult> results)
         sb.AppendLine("# Oven temperature accuracy");
         sb.AppendLine();
         var sittings = info.Sittings is { Count: > 1 } list
-            ? $" in {list.Count} sittings ({string.Join(", ", list.Select(d => d.ToLocalTime().ToString("yyyy-MM-dd HH:mm", Inv)))})"
+            ? $" in {list.Count} sittings ({string.Join(", ", list.Select(d => d.ToString("yyyy-MM-dd HH:mm", Inv)))})"
             : "";
-        sb.AppendLine($"Run {info.Started.ToLocalTime():yyyy-MM-dd HH:mm}{sittings} with {info.Meter} on {info.Location}. " +
+        // Times as recorded (in the offset they were saved with), so the report reads the same on any PC.
+        sb.AppendLine($"Run {info.Started.ToString("yyyy-MM-dd HH:mm", Inv)}{sittings} with {info.Meter} on {info.Location}. " +
                       $"A setpoint is accurate when its mean, including the ±95 % interval, is within ±{f.Span(info.ToleranceC)} of the setting.");
         sb.AppendLine();
 
