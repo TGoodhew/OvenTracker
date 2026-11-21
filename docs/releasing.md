@@ -74,7 +74,10 @@ Signing uses GitHub's OIDC token, so the repository stores no secret. Azure trus
 
 1. **Entra app.** Register an app (e.g. "OvenTracker release signing"). Give it a federated credential:
    - Issuer: `https://token.actions.githubusercontent.com`
-   - Subject: `repo:TGoodhew/OvenTracker:environment:release`
+   - Subject: `repo:TGoodhew@8283956/OvenTracker@1465826371:environment:release`. GitHub now names the
+     owner and repository with their numeric IDs. The job's log shows the exact subject when the sign-in
+     step fails ("No matching federated identity record"). A second credential with the older form,
+     `repo:TGoodhew/OvenTracker:environment:release`, is kept too, in case GitHub goes back to it.
    - Audience: `api://AzureADTokenExchange`
 2. **Role.** Give the app the role **Artifact Signing Certificate Profile Signer**, scoped to the
    certificate profile only (not the account, resource group or subscription).
