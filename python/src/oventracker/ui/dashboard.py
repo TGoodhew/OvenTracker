@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import enum
-import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -15,11 +14,11 @@ from rich.text import Text
 from ..analysis.setpoint_analyzer import Eta, PointPhase, SetpointAnalyzer, UnitKind
 from ..analysis.session_summary import TestPoint
 from ..meter.base import ReadingStatus
-from ..netfmt import clamp, fixed, net_ceiling
+from ..netfmt import fixed, net_ceiling
 from ..units import UnitFormatter, mode_name
 from . import battery_text, braille_plot
 from .console import escape
-from .widgets import Panel, columns, markup, rows, simple_table
+from .widgets import Panel, borderless, columns, markup, rows, simple_table
 
 _TABLE_ROWS = 6
 
@@ -86,10 +85,42 @@ def offset_markup(offset_c: float, tolerance_c: float, f: UnitFormatter) -> str:
     return f"[{color}]({escape(f.D(offset_c))})[/]"
 
 
-_KEYS_TEXT = "Keys: P oven says preheated   N finish this setpoint now   R restart it (door opened)   S skip   Z chart view   Q quit"
+#: The smallest and largest the chart can be, in rows of text.
+MIN_PLOT_ROWS, MAX_PLOT_ROWS = 3, 24
 
 
 def render(m: DashboardModel) -> RenderableType:
+    """The frame, sized to the window. The live display redraws in place only while the frame fits, so the chart
+    gets what's left once the rest is drawn: the frame is drawn with the smallest chart and measured (the tables
+    stack, and long lines wrap, in a narrow window), and the chart is grown by the rows to spare. The chart's
+    height is the only part that changes with it, so the result fits exactly. If even the smallest chart doesn't
+    fit, the frame is compact: one table, with the meter and its link in a single row."""
+    available = m.height - 2  # a line to spare, and one for the cursor
+    for compact in (False, True):
+        smallest = _render(m, MIN_PLOT_ROWS, compact)
+        spare = available - height_of(smallest, m.width)
+        if spare >= 0:
+            return smallest if spare == 0 else _render(m, min(MAX_PLOT_ROWS, MIN_PLOT_ROWS + spare), compact)
+        if compact:
+            return smallest  # a very small window: as small as it gets
+    raise AssertionError("not reached")
+
+
+def height_of(r: RenderableType, width: int) -> int:
+    """Dashboard.HeightOf: how many lines a renderable takes at a width (drawn as plain text and counted)."""
+    import io
+
+    from . import console as ui
+
+    buf = io.StringIO()
+    c = ui.make(file=buf, width=width, color_system=None)
+    c.print(r, end="")
+    s = buf.getvalue()
+    return 0 if not s else s.count("\n") + (0 if s.endswith("\n") else 1)
+
+
+def _render(m: DashboardModel, plot_rows: int, compact: bool) -> RenderableType:
+    """``compact``: one table instead of two, for a small window."""
     a = m.analyzer
     f = m.format
     now = a.now
@@ -122,11 +153,8 @@ def render(m: DashboardModel) -> RenderableType:
         ),
     )
 
-    # Chart. The frame keeps one height and stays inside the window, or the live display scrolls instead of
-    # redrawing in place: header 5 + chart borders 4 + two tables of TableRows + 2 + notice 1 + keys.
+    # Chart (its height from render(m), which sizes the frame to the window).
     plot_width = max(40, m.width - 4)
-    key_lines = int(math.ceil(len(_KEYS_TEXT) / max(20, m.width)))
-    plot_rows = int(clamp(m.height - 1 - (5 + 4 + _TABLE_ROWS + 2 + 1 + key_lines) - 1, 3, 24))
     t1 = max(now, 60.0)
     settled_from = max(0.0, a.turning_points[0].t - 180) if a.turning_points else 0.0
     if m.view == ChartView.Recent:
@@ -180,24 +208,43 @@ def render(m: DashboardModel) -> RenderableType:
         LinkState.Reconnecting: "[yellow]link lost, reconnecting…[/]",
         LinkState.Connecting: "[yellow]connecting…[/]",
     }.get(p.state, "[grey]stopped[/]")
+    drops = f" [grey]({p.reconnects} drop{'' if p.reconnects == 1 else 's'})[/]" if p.reconnects > 0 else ""
+    battery = battery_text.markup(p.battery_percent)
+    last_error = (
+        f"[yellow]{escape(p.last_error)}[/]"
+        if p.last_error is not None and p.last_error_at is not None and (datetime.now(timezone.utc) - p.last_error_at).total_seconds() < 120
+        else None
+    )
     meter = simple_table()
     meter.add_row("Meter", Text(m.meter_label))
-    meter.add_row("Link", markup(link + (f" [grey]({p.reconnects} drop{'' if p.reconnects == 1 else 's'})[/]" if p.reconnects > 0 else "")))
-    battery = battery_text.markup(p.battery_percent)
+    meter.add_row("Link", markup(link + drops))
     if battery is not None:
         meter.add_row("Battery", markup(battery))
     meter.add_row("Readings", f"{a.series.count:,}")
     meter.add_row("Detecting", f"turns of {f.span(a.hysteresis)} or more")
-    if p.last_error is not None and p.last_error_at is not None and (datetime.now(timezone.utc) - p.last_error_at).total_seconds() < 120:
-        meter.add_row("Last error", markup(f"[yellow]{escape(p.last_error)}[/]"))
+    if last_error is not None:
+        meter.add_row("Last error", markup(last_error))
 
-    while stats.row_count < _TABLE_ROWS:
-        stats.add_row("", "")
-    while meter.row_count < _TABLE_ROWS:
-        meter.add_row("", "")
-    bottom = columns(stats, meter)
+    bottom: RenderableType
+    if compact:
+        # The meter, its link (with any drops) and battery in one row, and the last error while there is one:
+        # what matters while watching, without the meter table (Dashboard.cs).
+        stats.add_row("Meter", markup(f"{escape(m.meter_label)}, {link}{drops}" + (f", battery {battery}" if battery is not None else "")))
+        if last_error is not None:
+            stats.add_row("Last error", markup(last_error))
+        while stats.row_count < _TABLE_ROWS:
+            stats.add_row("", "")
+        bottom = borderless(stats)  # no blank border lines
+    else:
+        while stats.row_count < _TABLE_ROWS:
+            stats.add_row("", "")
+        while meter.row_count < _TABLE_ROWS:
+            meter.add_row("", "")
+        bottom = columns(stats, meter)
     keys = markup(
-        "[grey]Keys:[/] [bold]P[/] oven says preheated   [bold]N[/] finish this setpoint now   "
+        "[grey]Keys:[/] [bold]P[/] preheated  [bold]N[/] finish  [bold]R[/] restart  [bold]S[/] skip  [bold]Z[/] view  [bold]Q[/] quit"
+        if compact
+        else "[grey]Keys:[/] [bold]P[/] oven says preheated   [bold]N[/] finish this setpoint now   "
         "[bold]R[/] restart it (door opened)   [bold]S[/] skip   [bold]Z[/] chart view   [bold]Q[/] quit"
     )
     parts: list[RenderableType] = [Panel(header, border=box.ROUNDED, border_style="orange1", expand=True), plot, bottom]

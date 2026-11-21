@@ -4,6 +4,7 @@ borders and styles, Columns, and a live view that crops from the top as Spectre'
 
 from __future__ import annotations
 
+import math
 import re
 from typing import Any, Iterable, Sequence
 
@@ -98,6 +99,34 @@ class FigletText:
 # Panel ----------------------------------------------------------------------------------------------
 
 
+def _truncate_with_ellipsis(segments: list[Segment], max_width: int) -> list[Segment]:
+    """Spectre's Segment.TruncateWithEllipsis, as a panel's header is cut to fit: whole words (Spectre's markup
+    is in words) while they fit in one less than the width, trailing spaces trimmed, then "…" in the last word's
+    style. A first word too long for it is cut."""
+    from rich.cells import cell_len, set_cell_size
+
+    words = [Segment(w, s.style) for s in segments for w in re.findall(r"\S+|\s+", s.text)]
+    if sum(cell_len(w.text) for w in words) <= max_width:
+        return words
+    limit = max_width - 1
+    kept: list[Segment] = []
+    total = 0
+    for w in words:
+        if total + cell_len(w.text) > limit:
+            break
+        kept.append(w)
+        total += cell_len(w.text)
+    if not kept and words and limit > 0:
+        kept = [Segment(set_cell_size(words[0].text, limit), words[0].style)]
+    while kept and not kept[-1].text.strip():
+        kept.pop()
+    if kept:
+        kept[-1] = Segment(kept[-1].text.rstrip(), kept[-1].style)
+    style = kept[-1].style if kept else (words[0].style if words else None)
+    return kept + [Segment("…", style)]
+
+
+
 class Panel:
     """new Panel(content).Header(header).Border(...).BorderColor(...)[.Expand()]: a box with one space either side
     of its content, and the header (markup, in the border's colour) straight after the top-left corner."""
@@ -134,12 +163,11 @@ class Panel:
             title = Text.from_markup(self.header)
             title.plain = title.plain.replace("\n", " ")
             title.stylize_before(border)
-            title.truncate(max(0, width - 3), overflow="ellipsis")
             yield Segment(b.top, border)
             used += 1
-            for seg in title.render(console):
+            for seg in _truncate_with_ellipsis(list(title.render(console)), width - 4):
                 yield seg
-            used += title.cell_len
+                used += seg.cell_length
         yield Segment(b.top * max(0, width - used - 1), border)
         yield Segment(b.top_right, border)
         yield Segment.line()
@@ -207,6 +235,19 @@ def _spectre_ratio_reduce(total: int, ratios: list[int], maximums: list[int], va
     return result
 
 
+def _spectre_ratio_distribute(total: int, ratios: list[int]) -> list[int]:
+    """Spectre's Ratio.Distribute: ``total`` shared out in proportion to ``ratios``, each share rounded up."""
+    total_ratio = sum(ratios)
+    remaining = total
+    result = []
+    for ratio in ratios:
+        share = math.ceil(ratio * remaining / total_ratio) if total_ratio > 0 else remaining
+        result.append(share)
+        total_ratio -= ratio
+        remaining -= share
+    return result
+
+
 import rich.table as _rich_table  # noqa: E402
 
 # Only if Rich still has it: otherwise tables use Rich's own, which differs only in narrow windows.
@@ -259,6 +300,30 @@ def simple_table() -> Table:
     return table(["", ""], border=box.SIMPLE, show_header=False)
 
 
+class borderless:
+    """table.Border(TableBorder.None), as Spectre draws a table without a border: no lines (not even blank ones),
+    no space at the edges and one between the columns. Spectre still sizes the columns as if each had its space
+    either side, so the table is drawn in a width that leaves that room."""
+
+    def __init__(self, t: Table):
+        t.box = None
+        t.show_edge = False
+        t.pad_edge = False
+        t.padding = (0, 1, 0, 0)
+        self.table = t
+
+    def _options(self, options: ConsoleOptions) -> ConsoleOptions:
+        # Spectre leaves two spaces a column; one between each pair is drawn.
+        n = len(self.table.columns)
+        return options.update(width=max(1, options.max_width - (n + 1)))
+
+    def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
+        yield from console.render(self.table, self._options(options))
+
+    def __rich_measure__(self, console: Console, options: ConsoleOptions) -> Measurement:
+        return Measurement.get(console, self._options(options), self.table)
+
+
 def grid(no_wrap_first: bool = False) -> Table:
     """new Grid().AddColumn().AddColumn(): two spaces between the columns."""
     g = Table.grid(padding=(0, 2, 0, 0), pad_edge=False)
@@ -297,9 +362,21 @@ class columns:
 
     def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
         count = self._count(console, options)
-        t = Table.grid(padding=(0, 1, 0, 0), pad_edge=False, expand=True)
-        for _ in range(count):
-            t.add_column(no_wrap=True)
+        max_width = options.max_width
+        # Each column as wide as its widest item; Spectre shares the spare width out in proportion to those widths
+        # (Rich would count the space between the columns as part of the first).
+        widths = [0] * count
+        for i, item in enumerate(self.items):
+            widths[i % count] = max(widths[i % count], min(max_width, Measurement.get(console, options, item).maximum))
+        spare = max_width - (sum(widths) + (count - 1))
+        fixed = spare >= 0 and sum(widths) > 0
+        t = Table.grid(padding=(0, 1, 0, 0), pad_edge=False, expand=not fixed)
+        if fixed:
+            for w, extra in zip(widths, _spectre_ratio_distribute(spare, widths)):
+                t.add_column(no_wrap=True, width=w + extra)
+        else:
+            for _ in range(count):
+                t.add_column(no_wrap=True)
         for i in range(0, len(self.items), count):
             row = self.items[i : i + count]
             t.add_row(*row, *([""] * (count - len(row))))

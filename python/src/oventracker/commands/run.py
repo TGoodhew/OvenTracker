@@ -710,7 +710,7 @@ def _execute(s: RunSettings, token: CancellationToken) -> int:
 
     recorder = RunRecorder(out_dir, info, append=resumed is not None)
     # A simulation's readings carry its own, faster clock: its events take the time of the latest reading, so
-    # readings.csv stays in time order.
+    # readings.csv stays in time order within a sitting. (A resumed simulation's clock starts again from the PC's.)
     if driver.is_simulation:
         recorder.clock = lambda: (
             recorder.last_reading_time if recorder.last_reading_time is not None else datetime.now(timezone.utc)

@@ -92,6 +92,10 @@ class U1253BMeter(TemperatureMeter):
             if self._reads_since_config >= self.config_every:
                 self.read_config()
         reply = self._query(protocol.FETCH)
+        # An event line (the dial or a button) during the query cleared the configuration: read it again, so the
+        # reply is judged by what the meter is set to now rather than lost as "not temperature".
+        if self._config is None:
+            self.read_config()
         return protocol.to_reading(datetime.now(timezone.utc), reply, self._config)
 
     def read_battery_percent(self) -> float | None:

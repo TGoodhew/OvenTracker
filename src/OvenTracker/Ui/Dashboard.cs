@@ -54,7 +54,48 @@ public static class Dashboard
         _ => "Complete",
     };
 
+    /// <summary>The smallest and largest the chart can be, in rows of text.</summary>
+    const int MinPlotRows = 3, MaxPlotRows = 24;
+
+    /// <summary>
+    /// The frame, sized to the window. The live display redraws in place only while the frame fits, so the chart
+    /// gets what's left once the rest is drawn: the frame is drawn with the smallest chart and measured (the tables
+    /// stack, and long lines wrap, in a narrow window), and the chart is grown by the rows to spare. The chart's
+    /// height is the only part that changes with it, so the result fits exactly. If even the smallest chart
+    /// doesn't fit, the frame is compact: one table, with the meter and its link in a single row.
+    /// </summary>
     public static IRenderable Render(DashboardModel m)
+    {
+        var available = m.Height - 2; // a line to spare, and one for the cursor
+        foreach (var compact in new[] { false, true })
+        {
+            var smallest = Render(m, MinPlotRows, compact);
+            var spare = available - HeightOf(smallest, m.Width);
+            if (spare >= 0) return spare == 0 ? smallest : Render(m, Math.Min(MaxPlotRows, MinPlotRows + spare), compact);
+            if (compact) return smallest; // a very small window: as small as it gets
+        }
+        throw new InvalidOperationException(); // not reached
+    }
+
+    /// <summary>How many lines a renderable takes at a width.</summary>
+    public static int HeightOf(IRenderable r, int width)
+    {
+        var w = new StringWriter();
+        var console = AnsiConsole.Create(new AnsiConsoleSettings
+        {
+            Ansi = AnsiSupport.No,
+            ColorSystem = ColorSystemSupport.NoColors,
+            Interactive = InteractionSupport.No,
+            Out = new AnsiConsoleOutput(w),
+        });
+        console.Profile.Width = width;
+        console.Write(r);
+        var s = w.ToString().Replace("\r\n", "\n");
+        return s.Length == 0 ? 0 : s.Count(ch => ch == '\n') + (s.EndsWith('\n') ? 0 : 1);
+    }
+
+    /// <param name="compact">One table instead of two, for a small window.</param>
+    static IRenderable Render(DashboardModel m, int plotRows, bool compact)
     {
         var a = m.Analyzer;
         var f = m.Format;
@@ -77,13 +118,8 @@ public static class Dashboard
             new Markup(m.Alert is { } alert ? $"{current}   [bold red]{Markup.Escape(alert)}[/]" : $"{current}{status}"),
             new Markup($"[cyan]{Markup.Escape(PhaseText(a))}[/]" + (a.Phase == PointPhase.Complete ? "" : $"   time left at this setting: [bold]{Markup.Escape(Remaining(a.EstimateRemaining()))}[/]")));
 
-        // Chart.
+        // Chart (its height from Render(m), which sizes the frame to the window).
         var plotWidth = Math.Max(40, m.Width - 4);
-        // The frame keeps one height and stays inside the window, or the live display scrolls instead of
-        // redrawing in place: header 5 + chart borders 4 + two tables of TableRows + 2 + notice 1 + keys.
-        var keysText = "Keys: P oven says preheated   N finish this setpoint now   R restart it (door opened)   S skip   Z chart view   Q quit";
-        var keyLines = (int)Math.Ceiling(keysText.Length / (double)Math.Max(20, m.Width));
-        var plotRows = Math.Clamp(m.Height - 1 - (5 + 4 + TableRows + 2 + 1 + keyLines) - 1, 3, 24);
         var t1 = Math.Max(now, 60);
         var settledFrom = a.TurningPoints.Count > 0 ? Math.Max(0, a.TurningPoints[0].T - 180) : 0;
         var (t0, viewName) = m.View switch
@@ -129,20 +165,38 @@ public static class Dashboard
             LinkState.Connecting => "[yellow]connecting…[/]",
             _ => "[grey]stopped[/]",
         };
+        var drops = p.Reconnects > 0 ? $" [grey]({p.Reconnects} drop{(p.Reconnects == 1 ? "" : "s")})[/]" : "";
+        var battery = BatteryText.Markup(p.BatteryPercent);
+        var lastError = p.LastError is { } err && p.LastErrorAt is { } at && DateTimeOffset.UtcNow - at < TimeSpan.FromMinutes(2)
+            ? $"[yellow]{Markup.Escape(err)}[/]" : null;
         var meter = new Table().Border(TableBorder.Simple).BorderColor(Color.Grey35).HideHeaders().AddColumn("").AddColumn("");
         meter.AddRow("Meter", Markup.Escape(m.MeterLabel));
-        meter.AddRow("Link", link + (p.Reconnects > 0 ? $" [grey]({p.Reconnects} drop{(p.Reconnects == 1 ? "" : "s")})[/]" : ""));
-        if (BatteryText.Markup(p.BatteryPercent) is { } battery) meter.AddRow("Battery", battery);
+        meter.AddRow("Link", link + drops);
+        if (battery is not null) meter.AddRow("Battery", battery);
         meter.AddRow("Readings", $"{a.Series.Count.ToString("N0", Inv)}");
         meter.AddRow("Detecting", $"turns of {f.Span(a.Hysteresis)} or more");
-        if (p.LastError is { } err && p.LastErrorAt is { } at && DateTimeOffset.UtcNow - at < TimeSpan.FromMinutes(2))
-            meter.AddRow("Last error", $"[yellow]{Markup.Escape(err)}[/]");
+        if (lastError is not null) meter.AddRow("Last error", lastError);
 
-        while (stats.Rows.Count < TableRows) stats.AddRow("", "");
-        while (meter.Rows.Count < TableRows) meter.AddRow("", "");
-        var bottom = new Columns(stats, meter) { Expand = true };
-        var keys = new Markup("[grey]Keys:[/] [bold]P[/] oven says preheated   [bold]N[/] finish this setpoint now   " +
-                              "[bold]R[/] restart it (door opened)   [bold]S[/] skip   [bold]Z[/] chart view   [bold]Q[/] quit");
+        IRenderable bottom;
+        if (compact)
+        {
+            // The meter, its link (with any drops) and battery in one row, and the last error while there is one:
+            // what matters while watching, without the meter table.
+            stats.AddRow("Meter", $"{Markup.Escape(m.MeterLabel)}, {link}{drops}" + (battery is not null ? $", battery {battery}" : ""));
+            if (lastError is not null) stats.AddRow("Last error", lastError);
+            while (stats.Rows.Count < TableRows) stats.AddRow("", "");
+            bottom = stats.Border(TableBorder.None); // no blank border lines
+        }
+        else
+        {
+            while (stats.Rows.Count < TableRows) stats.AddRow("", "");
+            while (meter.Rows.Count < TableRows) meter.AddRow("", "");
+            bottom = new Columns(stats, meter) { Expand = true };
+        }
+        var keys = new Markup(compact
+            ? "[grey]Keys:[/] [bold]P[/] preheated  [bold]N[/] finish  [bold]R[/] restart  [bold]S[/] skip  [bold]Z[/] view  [bold]Q[/] quit"
+            : "[grey]Keys:[/] [bold]P[/] oven says preheated   [bold]N[/] finish this setpoint now   " +
+              "[bold]R[/] restart it (door opened)   [bold]S[/] skip   [bold]Z[/] chart view   [bold]Q[/] quit");
         var parts = new List<IRenderable> { new Panel(header).Border(BoxBorder.Rounded).BorderColor(Color.Orange1).Expand(), plot, bottom };
         parts.Add(m.Notice is null ? new Text(" ") : new Markup($"[yellow]{Markup.Escape(m.Notice)}[/]"));
         parts.Add(keys);

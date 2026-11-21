@@ -48,7 +48,8 @@ def test_the_banner_is_the_c_sharp_apps():
 
 
 def test_figlet_text_leaves_out_what_the_font_doesnt_have():
-    # Spectre's font has no "−" (U+2212), so the adjustment prompt's "−10 F" shows as "10 F", as in the C# app.
+    # Spectre's font has no "−" (U+2212), so FigletText on its own draws "−10 F" as "10 F"; the change prompt makes
+    # it "-10 F" first (change_prompt.for_figlet, test_display.py).
     assert figlet_lines("−10 F", 80) == figlet_lines("10 F", 80)
     assert figlet_lines("SET THE OVEN TO BAKE 350", 80)[:6][0].startswith("  ____    _____   _____ ")
     assert len(figlet_lines("SET THE OVEN TO BAKE 350", 80)) == 18  # three rows of words
@@ -111,8 +112,8 @@ def test_clock_and_time_left():
 @pytest.mark.parametrize("width,height", [(120, 40), (100, 30), (200, 60), (80, 24)])
 def test_the_dashboard_fits_the_window(width, height):
     """The frame keeps one height and stays inside the window, so the live display redraws in place. At 80 columns
-    the two tables no longer fit side by side and go one under the other, as Spectre's Columns does, and the frame
-    is taller than a 24-line window: the live display then crops its top, as the C# app's does."""
+    the two tables would go one under the other and not fit a 24-line window, so the frame is compact: one table,
+    with the meter in a row of it (#41; more in test_display.py)."""
     a = SetpointAnalyzer(176.667, AnalysisOptions(precision_c=2 / 1.8))
     oven = SimulatedOven(7)
     oven.set(OvenMode.Bake, 176.667)
@@ -123,14 +124,14 @@ def test_the_dashboard_fits_the_window(width, height):
     m = dashboard.DashboardModel(TestPoint(1, OvenMode.Bake, 176.667), 4, a, F, poller, "simulated meter", "", 15 / 1.8,
                                  dashboard.ChartView.Auto, ReadingStatus.Ok, "A notice.", width, height)
     lines = render(dashboard.render(m), width, height).splitlines()
-    if width > 80:
-        assert len(lines) <= height - 1
-    else:
-        assert any(line.startswith("  Meter       simulated meter") for line in lines)  # under the statistics
+    assert len(lines) <= height - 2
+    if width <= 80:
+        assert any(line.startswith("Meter           simulated meter, connected") for line in lines)  # one table
     assert all(len(line) <= width for line in lines)
     assert lines[1].startswith("│ BAKE 350 °F   setpoint 1 of 4   elapsed 39:59")
-    m.alert = "An alert."  # (a long one wraps, as in the C# app; the live display then crops its top)
-    assert any("An alert." in line for line in render(dashboard.render(m), width, height).splitlines())
+    m.alert = "An alert."
+    with_alert = render(dashboard.render(m), width, height).splitlines()
+    assert any("An alert." in line for line in with_alert) and len(with_alert) <= height - 2
     for view in (dashboard.ChartView.Whole, dashboard.ChartView.Recent):
         m.view = view
         assert len(render(dashboard.render(m), width, height).splitlines()) == len(lines)

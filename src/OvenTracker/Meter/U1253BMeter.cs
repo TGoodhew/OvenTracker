@@ -76,6 +76,9 @@ public sealed class U1253BMeter(string portName, SerialSettings? settings = null
     {
         if (config is null || ++readsSinceConfig >= ConfigEvery) ReadConfig();
         var reply = Query(U1253BProtocol.Fetch);
+        // An event line (the dial or a button) during the query cleared the configuration: read it again, so the
+        // reply is judged by what the meter is set to now rather than lost as "not temperature".
+        if (config is null) ReadConfig();
         return U1253BProtocol.ToReading(DateTimeOffset.UtcNow, reply, config);
     }
 

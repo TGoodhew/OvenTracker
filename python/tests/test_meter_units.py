@@ -127,13 +127,26 @@ def test_the_meter_skips_events_and_rereads_its_configuration():
     meter._port = port
     meter.read_config()
     r = meter.read()
-    # The dial moved (*3): as in the C# app, that reading isn't used (the meter's setting is unknown until it is
-    # asked again, before the next reading).
-    assert r.status == ReadingStatus.NotTemperature and r.raw == "+1.80873000E+02"
-    assert meter.last_config is None
+    # The dial moved (*3) during the query: as in the C# app (#41), the configuration is read again straight away
+    # and the reply judged by it (now °F), rather than lost as "not temperature".
+    assert port.written == ["CONF?", "FETC?", "CONF?"]
+    assert r.status == ReadingStatus.Ok and r.raw == "+1.80873000E+02"
+    assert r.celsius == pytest.approx((180.873 - 32) / 1.8, abs=1e-3)
+    assert meter.last_config is not None
     r2 = meter.read()
-    assert port.written.count("CONF?") == 2
+    assert port.written.count("CONF?") == 2  # not again: the configuration is known
     assert r2.celsius == pytest.approx(176.6667, abs=1e-3)
+
+
+def test_a_reading_after_an_event_is_judged_by_the_new_configuration():
+    # The dial turned from temperature to volts during the query: the reply is then not a temperature.
+    meter = U1253BMeter("COM5")
+    port = _FakePort({"CONF?": ['"TEMP:K CEL"\r\n', '"VOLT:DC +5.000000E+00,+1.000000E-04"\r\n'], "FETC?": ["*1\r\n+1.23400000E+00\r\n"]})
+    meter._port = port
+    meter.read_config()
+    r = meter.read()
+    assert port.written == ["CONF?", "FETC?", "CONF?"]
+    assert r.status == ReadingStatus.NotTemperature
 
 
 def test_a_missing_reply_is_a_timeout():
