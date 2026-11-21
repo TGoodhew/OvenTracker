@@ -6,6 +6,16 @@ port doesn't cover it, or a `parity` issue is open), or **Python**.
 
 ## Unreleased
 
+- The UNI-T UT60BT, over Bluetooth LE: `--meter ut60bt` (#54). Has: **both**.
+  - **How it reads:** in its temperature mode (°C or °F) with a type K thermocouple. The app asks the meter for
+    its name, then for data. It retries with the other known data command while a request goes unanswered,
+    since the open-source decoders disagree on which one to use.
+  - **Battery:** its low-battery sign pauses the run for a battery swap.
+  - **Auto power-off:** 15 minutes. The meter doesn't report it, so the app always warns, with the steps from
+    the manual.
+  - **Bluetooth LE links:** they can now write to the meter as well as listen.
+  - **Not tried on a real meter yet.**
+
 - Battery swaps without starting the setpoint again (#51). Has: **both**.
   - **What pauses it:** a battery meter running low (checked every minute), a reading jumping faster than an
     oven can change, or **B**.

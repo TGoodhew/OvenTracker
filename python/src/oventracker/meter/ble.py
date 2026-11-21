@@ -43,6 +43,12 @@ class BleLink:
         """Connects, and subscribes to the characteristic."""
         raise NotImplementedError
 
+    def write(self, data: bytes) -> None:
+        """Sends bytes to the device's command characteristic (the ``write`` one given to :func:`link_for`), after
+        :meth:`open`: for a meter that answers requests, such as the UT60BT. A meter that only streams (the 121GW)
+        never calls it."""
+        raise NotImplementedError("This Bluetooth LE link has no characteristic to write to.")
+
     def dispose(self) -> None:
         raise NotImplementedError
 
@@ -202,13 +208,16 @@ def list_devices() -> list[BleDevice]:
 class BleakLink(BleLink):
     """One GATT characteristic through bleak: BleakClient(address), connect, then start_notify. bleak uses
     notifications when the characteristic has them and indications otherwise; each value arrives on the
-    Bluetooth LE loop's thread. ``connect_timeout``: for finding the device (bleak scans for it) and
-    connecting."""
+    Bluetooth LE loop's thread. ``write_characteristic``: the one :meth:`write` uses, if any. ``connect_timeout``:
+    for finding the device (bleak scans for it) and connecting."""
 
-    def __init__(self, address: str, service: str, characteristic: str, connect_timeout: float = 20.0):
+    def __init__(
+        self, address: str, service: str, characteristic: str, write_characteristic: str | None = None, connect_timeout: float = 20.0
+    ):
         self._address = address
         self.service = service
         self.characteristic = characteristic
+        self.write_characteristic = write_characteristic
         self.connect_timeout = connect_timeout
         self._client: Any = None
         self._notifying = False
@@ -233,6 +242,10 @@ class BleakLink(BleLink):
             client = bleak.BleakClient(self._address, timeout=self.connect_timeout)
             await client.connect()
             try:
+                # As the C# app does: a missing command characteristic fails here, not as unanswered requests later.
+                services = getattr(client, "services", None)
+                if self.write_characteristic is not None and services is not None and services.get_characteristic(self.write_characteristic) is None:
+                    raise MeterException(f"{self._address} connected, but doesn't offer the meter's GATT command characteristic.")
                 await client.start_notify(self.characteristic, on_value)
             except BaseException:
                 try:
@@ -249,6 +262,16 @@ class BleakLink(BleLink):
         except Exception as ex:
             raise MeterException(explain(ex, self._address)) from ex
         self._notifying = True
+
+    def write(self, data: bytes) -> None:
+        """Writes to the command characteristic without a response, as dmmpy does for the UT60BT."""
+        client = self._client
+        if client is None or self.write_characteristic is None:
+            raise MeterException("The Bluetooth LE link isn't open for writing.")
+        try:
+            _run(client.write_gatt_char(self.write_characteristic, bytes(data), response=False), 10)
+        except Exception as ex:
+            raise MeterException(explain(ex, self._address)) from ex
 
     def dispose(self) -> None:
         client, self._client = self._client, None
@@ -273,8 +296,9 @@ class BleakLink(BleLink):
             pass
 
 
-def link_for(address: str, service: str, characteristic: str) -> BleLink:
-    """BleLinks.For: the link to one characteristic of a device."""
+def link_for(address: str, service: str, characteristic: str, write: str | None = None) -> BleLink:
+    """BleLinks.For: the link to a device's ``characteristic`` (notified), and, if given, the ``write``
+    characteristic that :meth:`BleLink.write` uses."""
     if not is_supported():
         raise MeterException(not_supported_help())
-    return BleakLink(address, service, characteristic)
+    return BleakLink(address, service, characteristic, write)

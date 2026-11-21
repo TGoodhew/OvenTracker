@@ -9,7 +9,7 @@ namespace OvenTracker.Meter.Ble;
 /// characteristic, and subscribes with <c>GattCharacteristic1.StartNotify</c>. BlueZ then sends each value as a
 /// <c>PropertiesChanged</c> signal. It handles notify or indicate itself.
 /// </summary>
-public sealed class BlueZLink(string address, Guid service, Guid characteristic) : IBleLink
+public sealed class BlueZLink(string address, Guid service, Guid characteristic, Guid? write = null) : IBleLink
 {
     const string Bluez = "org.bluez";
     const string DeviceInterface = "org.bluez.Device1";
@@ -23,7 +23,7 @@ public sealed class BlueZLink(string address, Guid service, Guid characteristic)
 
     DBusConnection? connection;
     IDisposable? watch;
-    string? devicePath, characteristicPath;
+    string? devicePath, characteristicPath, writePath;
 
     public string Address => address;
 
@@ -109,8 +109,10 @@ public sealed class BlueZLink(string address, Guid service, Guid characteristic)
             {
                 objects = ManagedObjects(connection);
                 characteristicPath = CharacteristicPath(objects, devicePath, service, characteristic);
-                if (characteristicPath is not null) break;
-                if (DateTime.UtcNow > deadline) throw new MeterException($"{address} connected, but doesn't offer the meter's GATT characteristic.");
+                writePath = write is { } w ? CharacteristicPath(objects, devicePath, service, w) : null;
+                if (characteristicPath is not null && (write is null || writePath is not null)) break;
+                if (DateTime.UtcNow > deadline)
+                    throw new MeterException($"{address} connected, but doesn't offer the meter's GATT {(characteristicPath is null ? "characteristic" : "command characteristic")}.");
                 Thread.Sleep(250);
             }
 
@@ -134,6 +136,30 @@ public sealed class BlueZLink(string address, Guid service, Guid characteristic)
             Dispose();
             throw new MeterException(Explain(ex), ex);
         }
+    }
+
+    /// <summary>
+    /// Writes to the command characteristic: <c>GattCharacteristic1.WriteValue(ay value, a{sv} options)</c>, with
+    /// <c>type=command</c>, a write without a response, as on Windows and in bleak (BlueZ would otherwise wait for a
+    /// response whenever the characteristic allows one).
+    /// </summary>
+    public void Write(byte[] data)
+    {
+        if (connection is not { } c || writePath is null) throw new MeterException("The Bluetooth LE link isn't open for writing.");
+        MessageBuffer msg;
+        using (var w = c.GetMessageWriter())
+        {
+            w.WriteMethodCallHeader(Bluez, writePath, CharacteristicInterface, "WriteValue", "aya{sv}");
+            w.WriteArray(data);
+            var options = w.WriteDictionaryStart();
+            w.WriteDictionaryEntryStart();
+            w.WriteString("type");
+            w.WriteVariantString("command");
+            w.WriteDictionaryEnd(options);
+            msg = w.CreateMessage();
+        }
+        try { c.CallMethodAsync(msg).GetAwaiter().GetResult(); }
+        catch (DBusErrorReplyException ex) { throw new MeterException(Explain(ex), ex); }
     }
 
     /// <summary>The new value from a PropertiesChanged signal: (s interface, a{sv} changed, as invalidated).</summary>
@@ -236,6 +262,6 @@ public sealed class BlueZLink(string address, Guid service, Guid characteristic)
         }
         watch = null;
         connection = null;
-        devicePath = characteristicPath = null;
+        devicePath = characteristicPath = writePath = null;
     }
 }

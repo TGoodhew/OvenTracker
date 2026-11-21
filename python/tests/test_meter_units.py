@@ -320,10 +320,10 @@ def test_drivers_are_found_by_name(name, kind):
 
 
 def test_every_meter_is_in_the_python_version_now():
-    for name in ("121gw", "121GW"):
+    for name in ("121gw", "121GW", "ut60bt", "UT60BT"):
         d = drivers.find(name)
         assert d is not None and not d.not_ported
-    assert drivers.names() == "u1253b, 34401a, 121gw, simulated"
+    assert drivers.names() == "u1253b, 34401a, 121gw, ut60bt, simulated"
     assert not any(d.not_ported for d in drivers.all_drivers())
     # A meter the C# app gets first still has a way to say so.
     later = drivers.NotPortedDriver("fluke87", "Fluke 87 over IR", "COM5")

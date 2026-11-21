@@ -141,8 +141,9 @@ def all_drivers() -> list[MeterDriver]:
         from .hp34401a import Hp34401ADriver
         from .simulated import SimulatedDriver
         from .u1253b import U1253BDriver
+        from .ut60bt import Ut60btDriver
 
-        _ALL = [U1253BDriver(), Hp34401ADriver(), Eevblog121GwDriver(), SimulatedDriver()]
+        _ALL = [U1253BDriver(), Hp34401ADriver(), Eevblog121GwDriver(), Ut60btDriver(), SimulatedDriver()]
     return _ALL
 
 

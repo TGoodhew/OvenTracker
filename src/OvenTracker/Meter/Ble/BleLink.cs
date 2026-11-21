@@ -14,6 +14,13 @@ public interface IBleLink : IDisposable
 
     /// <summary>Connects, and subscribes to the characteristic (indications if it has them, otherwise notifications).</summary>
     void Open(Action<byte[]> received);
+
+    /// <summary>
+    /// Sends bytes to the device's command characteristic (the one given to <see cref="BleLinks.For"/> as
+    /// <c>write</c>), after <see cref="Open"/>: for a meter that answers requests, such as the UT60BT. A meter that
+    /// only streams (the 121GW) never calls it.
+    /// </summary>
+    void Write(byte[] data) => throw new NotSupportedException("This Bluetooth LE link has no characteristic to write to.");
 }
 
 /// <summary>Bluetooth LE on this system: Windows through its GATT API, Linux through BlueZ; not macOS yet.</summary>
@@ -38,9 +45,13 @@ public static class BleLinks
     /// </summary>
     public static IReadOnlyList<BleDevice> Scan() => OperatingSystem.IsLinux() ? BlueZLink.ScanDevices() : List();
 
-    public static IBleLink For(string address, Guid service, Guid characteristic) =>
-        OperatingSystem.IsWindows() ? new WindowsGattLink(address, service, characteristic)
-        : OperatingSystem.IsLinux() ? new BlueZLink(address, service, characteristic)
+    /// <summary>
+    /// The link to a device's <paramref name="characteristic"/> (notified) in <paramref name="service"/>, and, if
+    /// given, the <paramref name="write"/> characteristic in the same service that <see cref="IBleLink.Write"/> uses.
+    /// </summary>
+    public static IBleLink For(string address, Guid service, Guid characteristic, Guid? write = null) =>
+        OperatingSystem.IsWindows() ? new WindowsGattLink(address, service, characteristic, write)
+        : OperatingSystem.IsLinux() ? new BlueZLink(address, service, characteristic, write)
         : throw new MeterException(NotSupportedHelp);
 
     /// <summary>"c4be84123456", "C4:BE:84:12:34:56" or "C4-BE-84-12-34-56" as "C4:BE:84:12:34:56". Null if it isn't one.</summary>

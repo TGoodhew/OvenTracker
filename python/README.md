@@ -32,6 +32,9 @@ The meters:
     straight to it), on Windows, Linux (through BlueZ, so `bluetoothd` must be running) and macOS.
   - `meters --meter 121gw` lists the Bluetooth LE devices a scan finds, the 121GWs first.
   - The main README's "The EEVblog 121GW" section has the rest.
+- **UNI-T UT60BT:** `--meter ut60bt`, over Bluetooth LE through bleak as for the 121GW, in its temperature mode
+  with a type K thermocouple. Turn its Bluetooth on first (hold SELECT until BT shows). The main README's
+  "The UNI-T UT60BT" section has the rest.
 - **The simulator:** `--simulate`.
 
 ## Install
@@ -43,7 +46,7 @@ pip install ./python          # or, to keep it apart from other packages: pipx i
 ```
 
 It needs `rich` and `pyserial`, which pip installs. For a 34401A on GPIB, add PyVISA with
-`pip install "./python[visa]"`; for a 121GW, add bleak with `pip install "./python[ble]"`. On Linux the U1177A pairs and binds as for the C# app; see
+`pip install "./python[visa]"`; for a 121GW or a UT60BT, add bleak with `pip install "./python[ble]"`. On Linux the U1177A pairs and binds as for the C# app; see
 the main README's Linux section.
 
 ## Try it without a meter

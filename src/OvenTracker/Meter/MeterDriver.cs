@@ -90,7 +90,7 @@ public static class MeterDrivers
 {
     public const string DefaultName = U1253BDriver.DriverName;
 
-    public static IReadOnlyList<IMeterDriver> All { get; } = [new U1253BDriver(), new Hp34401ADriver(), new Eevblog121GwDriver(), new SimulatedDriver()];
+    public static IReadOnlyList<IMeterDriver> All { get; } = [new U1253BDriver(), new Hp34401ADriver(), new Eevblog121GwDriver(), new Ut60btDriver(), new SimulatedDriver()];
 
     public static IMeterDriver? Find(string? name) =>
         All.FirstOrDefault(d => string.Equals(d.Name, name?.Trim(), StringComparison.OrdinalIgnoreCase));
