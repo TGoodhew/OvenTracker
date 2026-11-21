@@ -219,7 +219,9 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
             AnsiConsole.MarkupLine(resource is not null
                 ? $"[red]No meter answered on {Markup.Escape(resource)}[/]: {Markup.Escape(found?.Error ?? "")}"
                 : $"[red]No meter answered[/] (looking for a {Markup.Escape(driver.Description)}).");
-            if (driver.NotFoundHelp.Length > 0) AnsiConsole.MarkupLine(Markup.Escape(driver.NotFoundHelp));
+            // Not when the error just shown already says it (a driver may put its help in the error).
+            if (driver.NotFoundHelp.Length > 0 && !(found?.Error ?? "").Contains(driver.NotFoundHelp, StringComparison.Ordinal))
+                AnsiConsole.MarkupLine(Markup.Escape(driver.NotFoundHelp));
             AnsiConsole.MarkupLine($"[bold]oventracker meters[/] lists what each kind of meter can see. Give the meter's location with [bold]--resource[/] " +
                                    $"({Markup.Escape(driver.ResourceHelp)}), or another kind of meter with [bold]--meter[/] ({Markup.Escape(MeterDrivers.Names)}).");
             return 1;

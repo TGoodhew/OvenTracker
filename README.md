@@ -361,6 +361,12 @@ The protocol comes from EEVblog's packet format (V2) as written up by the dmm-to
 decoder. Both agree with packets captured from real meters. The driver hasn't been tried on a 121GW yet.
 Report what you find.
 
+**In the Python app** the 121GW goes through [bleak](https://github.com/hbldh/bleak), an optional extra
+(`pip install "./python[ble]"`). bleak scans for the meter, so it needs no pairing on Windows either: the
+meter just has to be on with Bluetooth on. `oventracker-py meters --meter 121gw` scans for 5 seconds and lists
+what it finds, with any 121GW first. bleak works on Windows, Linux (through BlueZ) and macOS, though only the
+first two have been exercised.
+
 To add a meter, for example a bench DMM with a thermocouple input, implement `ITemperatureMeter` and
 `IMeterDriver` and list the driver in `MeterDrivers.All`. Only four members are required; the rest (the
 sensor, battery, beep, and the meter's auto power-off setting) are optional. A driver can also declare that
@@ -382,8 +388,9 @@ reconnects and carries on.
 ## Protocol notes (121GW)
 
 The meter streams 19-byte packets on the GATT characteristic `e7add780-b042-4876-aae1-112855353cc1` of the
-service `0bd51666-e7cb-469b-8e4d-2742f1ba77cc`. The app subscribes with indications, or notifications if the
-characteristic offers only those. It sends nothing to the meter.
+service `0bd51666-e7cb-469b-8e4d-2742f1ba77cc`. The C# app subscribes with indications, or notifications if
+the characteristic offers only those; the Python app leaves that to bleak, which on Windows uses notifications
+when the characteristic has them. Either way the data is the same. It sends nothing to the meter.
 
 Each packet is F2, then 17 bytes of display data, then an XOR checksum, so all 19 bytes XOR to zero. Byte 5
 holds the main mode (5 is temperature) and the two high bits of the value. Byte 6 holds overload, sign, °C,
@@ -408,9 +415,10 @@ front panel back.
 
 `python/` holds a second implementation of the whole app in Python. It has the same commands (`run`,
 `characterise`, `analyze`, `ovens`, `meters`), options, screens and files, drawn with
-[Rich](https://github.com/Textualize/rich) instead of Spectre.Console. Its meters are the U1253B and the
-simulator so far; the 34401A and the 121GW are issues #38 and #39. Install it with pip on any system, with no
-.NET needed:
+[Rich](https://github.com/Textualize/rich) instead of Spectre.Console. It has every meter the app has: the
+U1253B, the 34401A (GPIB needs `pip install "./python[visa]"`), the 121GW (Bluetooth LE through
+[bleak](https://github.com/hbldh/bleak): `pip install "./python[ble]"`) and the simulator. Install it with pip
+on any system, with no .NET needed:
 
 ```sh
 pip install ./python                     # or: pipx install ./python

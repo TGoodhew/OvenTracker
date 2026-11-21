@@ -134,20 +134,12 @@ def all_drivers() -> list[MeterDriver]:
     """The meters the app knows, in the C# app's order."""
     global _ALL
     if _ALL is None:
+        from .eevblog121gw import Eevblog121GwDriver
         from .hp34401a import Hp34401ADriver
         from .simulated import SimulatedDriver
         from .u1253b import U1253BDriver
 
-        _ALL = [
-            U1253BDriver(),
-            Hp34401ADriver(),
-            NotPortedDriver(
-                "121gw",
-                "EEVblog 121GW over Bluetooth LE",
-                "a paired Bluetooth LE meter, by address or name, e.g. ble:C4:BE:84:12:34:56 or ble:121GW",
-            ),
-            SimulatedDriver(),
-        ]
+        _ALL = [U1253BDriver(), Hp34401ADriver(), Eevblog121GwDriver(), SimulatedDriver()]
     return _ALL
 
 

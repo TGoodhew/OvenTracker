@@ -25,8 +25,14 @@ The meters:
   - GPIB goes through PyVISA, an optional extra: `pip install "./python[visa]"`, with a VISA library (NI-VISA
     or Keysight IO Libraries Suite) installed. Without them, the app says what's missing.
   - The main README's "The 34401A with a type K thermocouple" section has the rest.
+- **EEVblog 121GW:** `--meter 121gw`, over Bluetooth LE, in its temperature mode with a type K thermocouple.
+  - Bluetooth LE goes through bleak, an optional extra: `pip install "./python[ble]"`. Without it, the app
+    says what to install.
+  - The meter needn't be paired: the app scans for it for a few seconds (`--resource ble:<address>` goes
+    straight to it), on Windows, Linux (through BlueZ, so `bluetoothd` must be running) and macOS.
+  - `meters --meter 121gw` lists the Bluetooth LE devices a scan finds, the 121GWs first.
+  - The main README's "The EEVblog 121GW" section has the rest.
 - **The simulator:** `--simulate`.
-- **Not here yet:** the C# app's EEVblog 121GW driver (issue #39). `--meter 121gw` says so.
 
 ## Install
 
@@ -37,7 +43,7 @@ pip install ./python          # or, to keep it apart from other packages: pipx i
 ```
 
 It needs `rich` and `pyserial`, which pip installs. For a 34401A on GPIB, add PyVISA with
-`pip install "./python[visa]"`. On Linux the U1177A pairs and binds as for the C# app; see
+`pip install "./python[visa]"`; for a 121GW, add bleak with `pip install "./python[ble]"`. On Linux the U1177A pairs and binds as for the C# app; see
 the main README's Linux section.
 
 ## Try it without a meter

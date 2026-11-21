@@ -6,6 +6,11 @@ port doesn't cover it, or a `parity` issue is open), or **Python**.
 
 ## Unreleased
 
+- The Python app has the EEVblog 121GW, through bleak (`pip install "./python[ble]"`), on Windows, Linux and
+  macOS, with no pairing needed (#39). Both apps: a 121GW reading can no longer be skipped, or take the next
+  packet's time, when a packet arrives just as it's read; a link that fails part-way through opening is
+  released; and the not-found help isn't printed twice. Has: **both**.
+
 - The 34401A reads a type K thermocouple instead of a PT100: DC millivolts with cold-junction compensation
   (`--meter-option cj=22C`, 23 °C assumed when left off). The probe is a generic type K, and `--probe` picks a
   specific one. The run records its meter options in `session.json` (`meterOptions`). Has: **C#** (the Python

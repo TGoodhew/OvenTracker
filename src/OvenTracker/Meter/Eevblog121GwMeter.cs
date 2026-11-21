@@ -27,9 +27,14 @@ public sealed class Eevblog121GwMeter(IBleLink link) : ITemperatureMeter
     public MeterIdentity Connect()
     {
         Disconnect();
-        link.Open(OnData);
+        try { link.Open(OnData); }
+        catch
+        {
+            try { link.Dispose(); } catch { } // a link that failed part-way through opening is still released
+            throw;
+        }
         open = true;
-        var p = WaitForPacket(0) ?? throw new TimeoutException("The 121GW sent no data. Check it's on, and Bluetooth is on (BT on its display).");
+        var (p, _) = WaitForPacket(0) ?? throw new TimeoutException("The 121GW sent no data. Check it's on, and Bluetooth is on (BT on its display).");
         return new MeterIdentity("EEVblog", "121GW", p.Serial, "?");
     }
 
@@ -48,7 +53,12 @@ public sealed class Eevblog121GwMeter(IBleLink link) : ITemperatureMeter
     }
 
     /// <summary>The newest packet after the <paramref name="after"/>th one, or null if none comes in time.</summary>
-    Gw121Packet? WaitForPacket(long after)
+    /// <summary>
+    /// The newest packet after the <paramref name="after"/>th one, with the time it came, or null if none comes in time.
+    /// With <paramref name="take"/>, it's marked as returned in the same lock: a packet arriving just after can't be
+    /// skipped, or give its time to this one.
+    /// </summary>
+    (Gw121Packet Packet, DateTimeOffset At)? WaitForPacket(long after, bool take = false)
     {
         var deadline = DateTime.UtcNow + Timeout;
         lock (gate)
@@ -59,7 +69,8 @@ public sealed class Eevblog121GwMeter(IBleLink link) : ITemperatureMeter
                 if (left <= TimeSpan.Zero) return null;
                 Monitor.Wait(gate, left);
             }
-            return latest;
+            if (take) returned = received;
+            return (latest!, latestTime);
         }
     }
 
@@ -73,13 +84,7 @@ public sealed class Eevblog121GwMeter(IBleLink link) : ITemperatureMeter
     {
         long seen;
         lock (gate) seen = returned;
-        var p = WaitForPacket(seen) ?? throw new TimeoutException("The 121GW stopped sending (switched off, out of range, or Bluetooth turned off).");
-        DateTimeOffset at;
-        lock (gate)
-        {
-            returned = received;
-            at = latestTime;
-        }
+        var (p, at) = WaitForPacket(seen, take: true) ?? throw new TimeoutException("The 121GW stopped sending (switched off, out of range, or Bluetooth turned off).");
         return Gw121Protocol.ToReading(at, p);
     }
 

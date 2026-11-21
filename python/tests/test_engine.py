@@ -115,12 +115,6 @@ def test_a_resumed_run_waits_for_a_hot_oven_and_finishes_the_rest(tmp_path: Path
     assert len(session["sittings"]) == 2
 
 
-def test_a_meter_the_python_version_doesnt_have_yet_says_so():
-    p = run_app("run", "--meter", "121gw", "-y", "--unit", "F", "--modes", "bake", "--setpoints", "350")
-    assert p.returncode == 1
-    assert "isn't in the Python version yet" in p.stdout
-
-
 def test_a_34401a_that_isnt_there_is_a_message_not_a_traceback(tmp_path: Path):
     # A settings folder of its own, so a 34401A remembered on this PC is never sent anything.
     env = {"APPDATA": str(tmp_path), "XDG_CONFIG_HOME": str(tmp_path)}

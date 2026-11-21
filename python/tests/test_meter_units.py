@@ -318,12 +318,16 @@ def test_drivers_are_found_by_name(name, kind):
     assert isinstance(drivers.find(name), kind)
 
 
-def test_the_meters_not_in_the_python_version_are_known_and_say_so():
+def test_every_meter_is_in_the_python_version_now():
     for name in ("121gw", "121GW"):
         d = drivers.find(name)
-        assert d is not None and d.not_ported
-        assert "isn't in the Python version yet" in d.not_ported_message
+        assert d is not None and not d.not_ported
     assert drivers.names() == "u1253b, 34401a, 121gw, simulated"
+    assert not any(d.not_ported for d in drivers.all_drivers())
+    # A meter the C# app gets first still has a way to say so.
+    later = drivers.NotPortedDriver("fluke87", "Fluke 87 over IR", "COM5")
+    assert later.not_ported and "isn't in the Python version yet" in later.not_ported_message
+    assert later.open(drivers.MeterRequest(None, None, 1)).error == later.not_ported_message
 
 
 def test_an_unknown_driver_is_not_found():
@@ -342,9 +346,9 @@ def test_the_driver_is_the_one_asked_for_then_the_last_one_then_the_default():
     simulated_last = AppSettings()
     simulated_last.remember("simulated", "simulator")
     assert choose_driver(RunSettings(), simulated_last).name == drivers.DEFAULT_NAME  # not a simulation again
-    c_sharp_last = AppSettings()
-    c_sharp_last.remember("121gw", "ble:121GW")  # used last by the C# app
-    assert choose_driver(RunSettings(), c_sharp_last).name == drivers.DEFAULT_NAME
+    ble_last = AppSettings()
+    ble_last.remember("121gw", "ble:121GW")  # in both apps now
+    assert choose_driver(RunSettings(), ble_last).name == "121gw"
     bench_last = AppSettings()
     bench_last.remember("34401a", "GPIB0::22::INSTR")  # in both apps now
     assert choose_driver(RunSettings(), bench_last).name == "34401a"
