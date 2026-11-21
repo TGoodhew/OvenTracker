@@ -163,6 +163,13 @@ starts above the setting and has to cool to it. `minUnits` is `o.minBlocks` when
 5. Noise: append c to the noise window, dropping the oldest beyond 120 values. If the series now holds a
    multiple of 30 samples, `noiseSigma = noiseSigma(noise window)`.
 6. If `timeToSetpoint` is none and (`cooling` ? `smooth ≤ S` : `smooth ≥ S`), `timeToSetpoint = t`.
+6½. **Withdrawing a mistaken arrival** (#49): if `arrivalC` is set, `phase` is Settling or Measuring, `kind`
+   isn't Block, there are fewer than `minUnits` units, and the oven has gone well past that turn (`cooling` ?
+   `smooth < arrivalC − m` : `smooth > arrivalC + m`, with `m = max(5, 3 · h)` °C, `MinArrivalMarginC` being
+   5), withdraw it: add the units to `discardedUnits` and clear them and the cycle durations, move
+   `turningPoints` to the set-aside approach turns and clear it, clear `timeToSetpoint` if the arrival set it,
+   clear `arrivalC`, `overshootC`, `measuringStart` and `kind`, and set `phase = Heating`. The oven was heating
+   (or cooling) in steps, and what followed was the approach, not the thermostat.
 7. Feed (t, `smooth`) to the turning-point detector with hysteresis `h = max(o.minHysteresisC, 5 · noiseSigma)`.
    If it returns a turning point, handle it ([phases](#phases), [cycles](#cycles)).
 8. If `phase` is Measuring and `kind` is Block: with `len = o.blockMinutes · 60`, while `phase` is still
@@ -225,13 +232,24 @@ The comparisons are strict or not exactly as written.
 3. **Measuring.** Each trough closes a cycle, and each cycle is one independent value.
 4. **Complete.**
 
-On every turning point `tp`, first append it to `turningPoints`. Then:
+On every turning point `tp`:
 
-- If `phase` is Heating: `phase = Settling`; if `timeToSetpoint` is none, `timeToSetpoint = tp.T` (an oven
-  that runs cold turns round before it reaches the setting); and if `tp` is a Peak and not `cooling`,
-  `overshootC = range(tp.T − 30, tp.T + 30).max − S` on the raw series (`tp.T + 30` may be beyond the last
-  sample; `valueAt` clamps). A first turning point that is a trough gives no overshoot.
+- If `phase` is Heating: `phase = Settling`. If `tp` is a step the approach could make, short of the setting
+  (heating: a Peak below S; `cooling`: a Trough above S), `arrivalC = tp.C`, so the arrival can be withdrawn
+  if the oven goes on well past it (step 6½ of [each sample](#each-sample)); otherwise `arrivalC` is none (a
+  turn the other way, or at or beyond the setting, means the oven got there). If `timeToSetpoint` is none,
+  `timeToSetpoint = tp.T` (an oven that runs cold turns round before it reaches the setting), remembering that
+  the arrival set it. If `tp` is a Peak and not `cooling`, `overshootC = range(tp.T − 30, tp.T + 30).max − S`
+  on the raw series (`tp.T + 30` may be beyond the last sample; `valueAt` clamps). A first turning point that
+  is a trough gives no overshoot.
+- Append `tp` to `turningPoints`.
 - Then, only if `tp` is a Trough and `kind` isn't Block, go on to [cycles](#cycles).
+
+Why: an oven can heat in steps, its elements taking turns, with dips bigger than the turning-point threshold (a
+GE PHS925 dips by 8 °C on the way to 350 °F). The first such step used to count as reaching the setting, and the
+later steps as thermostat cycles. Withdrawal catches it without delaying an oven that really runs cold or hot:
+its turns stay at one level, within the margin, which is wider than an oven's turns vary from cycle to cycle
+(about 3 °C) and narrower than a preheat's steps (6–8 °C).
 
 The time to setpoint is whichever comes first: step 6 of [each sample](#each-sample), or the first turning
 point.
@@ -258,7 +276,7 @@ Some ovens hold temperature without a visible on/off cycle. With no turning poin
 trace, the steady state is cut into fixed blocks of `o.blockMinutes` (3 min) instead.
 
 The rule runs at most every 10 s of t ([step 9](#each-sample)). With `last` the `confirmedAt` of the latest
-turning point (0 if none), `quiet = t − last`, and `noCycle = o.noCycleMinutes · 60`:
+turning point, in `turningPoints` or among the set-aside approach turns (0 if none), `quiet = t − last`, and `noCycle = o.noCycleMinutes · 60`:
 
 - **Measuring cycles, but the cycling has stopped.** If `phase` is Measuring and `kind` is Cycle:
   `expected = expectedUnitSeconds() ?? o.defaultCycleMinutes · 60`. If `quiet ≥ max(3 · expected, noCycle)` and

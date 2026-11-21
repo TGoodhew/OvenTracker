@@ -232,6 +232,12 @@ class SetpointAnalyzer:
         self.measuring_start: float | None = None
         self._time_to_setpoint: float | None = None
         self._overshoot_c: float | None = None
+        #: Turns taken as getting to the setting and then withdrawn: an oven heating in steps (#49).
+        self._approach_turns: list[TurningPoint] = []
+        #: The level of the turn taken as getting to the setting, while that could still prove a mistake.
+        self._arrival_c: float | None = None
+        #: Whether _time_to_setpoint came from that turn, rather than from crossing the setting.
+        self._arrival_set_time = False
         self._preheat_t: float | None = None
         self._preheat_c: float | None = None
         self.phase = PointPhase.Heating
@@ -265,6 +271,15 @@ class SetpointAnalyzer:
     def min_units(self) -> int:
         return self.options.min_blocks if self.kind == UnitKind.Block else self.options.min_cycles
 
+    #: The floor of arrival_margin_c (SetpointAnalyzer.MinArrivalMarginC).
+    MIN_ARRIVAL_MARGIN_C = 5.0
+
+    @property
+    def arrival_margin_c(self) -> float:
+        """How far past a turn taken as getting to the setting the oven may go before that's withdrawn: 5 °C, or three
+        times the turning-point threshold if that's more (SetpointAnalyzer.ArrivalMarginC)."""
+        return max(self.MIN_ARRIVAL_MARGIN_C, 3 * self.hysteresis)
+
     def add(self, t: float, c: float) -> None:
         o = self.options
         if self.phase == PointPhase.Complete:
@@ -289,6 +304,17 @@ class SetpointAnalyzer:
         if self._time_to_setpoint is None and (smooth <= self.setpoint_c if self.cooling else smooth >= self.setpoint_c):
             self._time_to_setpoint = t
 
+        # Taken as there, but the oven has gone on well past that turn: it was still heating (or cooling) in steps.
+        level = self._arrival_c
+        if (
+            level is not None
+            and self.phase in (PointPhase.Settling, PointPhase.Measuring)
+            and self.kind != UnitKind.Block
+            and len(self.units) < self.min_units
+            and (smooth < level - self.arrival_margin_c if self.cooling else smooth > level + self.arrival_margin_c)
+        ):
+            self._withdraw_arrival()
+
         tp = self._detector.add(t, smooth, self.hysteresis)
         if tp is not None:
             self._on_turning_point(tp)
@@ -307,14 +333,23 @@ class SetpointAnalyzer:
             self._complete(CompletionReason.TimedOut)
 
     def _on_turning_point(self, tp: TurningPoint) -> None:
-        self.turning_points.append(tp)
-
         if self.phase == PointPhase.Heating:
             self.phase = PointPhase.Settling
+            # A peak short of the setting while heating (or a trough short of it while cooling) may be the oven's
+            # thermostat (an oven that runs cold or hot), or a step in its heating: it's withdrawn if the oven goes on
+            # well past it (see add). A turn the other way, or at or beyond the setting, is the oven cycling.
+            step_on_the_way = (
+                tp.kind == TurningKind.Trough and tp.c > self.setpoint_c
+                if self.cooling
+                else tp.kind == TurningKind.Peak and tp.c < self.setpoint_c
+            )
+            self._arrival_c = tp.c if step_on_the_way else None
             if self._time_to_setpoint is None:
                 self._time_to_setpoint = tp.t  # an oven that runs cold turns round before it gets there
+                self._arrival_set_time = True
             if tp.kind == TurningKind.Peak and not self.cooling:
                 self._overshoot_c = self.series.range(tp.t - 30, tp.t + 30)[1] - self.setpoint_c
+        self.turning_points.append(tp)
 
         if tp.kind != TurningKind.Trough or self.kind == UnitKind.Block:
             return
@@ -329,9 +364,29 @@ class SetpointAnalyzer:
             self.measuring_start = tp.t
             self._unit_start = tp.t
 
+    def _withdraw_arrival(self) -> None:
+        """The oven went on past the turn taken as getting there: back to heating (SetpointAnalyzer.WithdrawArrival)."""
+        self.discarded_units += len(self.units)
+        self.units.clear()
+        self._cycle_durations.clear()
+        self._approach_turns.extend(self.turning_points)
+        self.turning_points.clear()
+        if self._arrival_set_time:
+            self._time_to_setpoint = None
+        self._arrival_set_time = False
+        self._arrival_c = None
+        self._overshoot_c = None
+        self.measuring_start = None
+        self.kind = None
+        self.phase = PointPhase.Heating
+
     def _check_for_no_cycling(self, t: float) -> None:
         o = self.options
-        last_turn = self.turning_points[-1].confirmed_at if self.turning_points else 0.0
+        # Any turn counts as the oven not being still, those set aside on the way there too.
+        last_turn = max(
+            self.turning_points[-1].confirmed_at if self.turning_points else 0.0,
+            self._approach_turns[-1].confirmed_at if self._approach_turns else 0.0,
+        )
         quiet_for = t - last_turn
         no_cycle = o.no_cycle_minutes * 60
 

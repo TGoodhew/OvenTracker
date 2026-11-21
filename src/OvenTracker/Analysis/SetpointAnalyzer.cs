@@ -127,6 +127,18 @@ public sealed class SetpointAnalyzer
     double? measuringStart;
     double? timeToSetpoint;
     double? overshootC;
+
+    /// <summary>Turns taken as getting to the setting and then withdrawn: an oven heating in steps (#49).</summary>
+    readonly List<TurningPoint> approachTurns = [];
+
+    /// <summary>
+    /// The level of the turn taken as getting to the setting, while that could still prove a mistake: only when it was
+    /// short of the setting (a turn at or beyond it means the oven got there).
+    /// </summary>
+    double? arrivalC;
+
+    /// <summary>Whether <see cref="timeToSetpoint"/> came from that turn, rather than from crossing the setting.</summary>
+    bool arrivalSetTime;
     double? preheatT, preheatC;
 
     public SetpointAnalyzer(double setpointC, AnalysisOptions? options = null)
@@ -154,6 +166,15 @@ public sealed class SetpointAnalyzer
     public bool Cooling => StartC is { } s && s > SetpointC;
     public int MinUnits => Kind == UnitKind.Block ? o.MinBlocks : o.MinCycles;
 
+    /// <summary>
+    /// How far past a turn taken as getting to the setting the oven may go before that's withdrawn: 5 °C (9 °F), or three
+    /// times the turning-point threshold if that's more. Wider than an oven's turns vary from one cycle to the next (its
+    /// troughs can wander 3 °C), narrower than the steps of a preheat (6–8 °C on a GE PHS925, #49).
+    /// </summary>
+    public double ArrivalMarginC => Math.Max(MinArrivalMarginC, 3 * Hysteresis);
+
+    public const double MinArrivalMarginC = 5;
+
     public void Add(double t, double c)
     {
         if (Phase == PointPhase.Complete) return;
@@ -172,6 +193,11 @@ public sealed class SetpointAnalyzer
 
         if (timeToSetpoint is null && (Cooling ? smooth <= SetpointC : smooth >= SetpointC))
             timeToSetpoint = t;
+
+        // Taken as there, but the oven has gone on well past that turn: it was still heating (or cooling) in steps.
+        if (arrivalC is { } level && Phase is PointPhase.Settling or PointPhase.Measuring && Kind != UnitKind.Block && units.Count < MinUnits
+            && (Cooling ? smooth < level - ArrivalMarginC : smooth > level + ArrivalMarginC))
+            WithdrawArrival();
 
         var tp = detector.Add(t, smooth, Hysteresis);
         if (tp is not null) OnTurningPoint(tp);
@@ -198,15 +224,23 @@ public sealed class SetpointAnalyzer
 
     void OnTurningPoint(TurningPoint tp)
     {
-        turningPoints.Add(tp);
-
         if (Phase == PointPhase.Heating)
         {
             Phase = PointPhase.Settling;
-            timeToSetpoint ??= tp.T; // an oven that runs cold turns round before it gets there
+            // A peak short of the setting while heating (or a trough short of it while cooling) may be the oven's thermostat
+            // (an oven that runs cold or hot), or a step in its heating: it's withdrawn if the oven goes on well past it
+            // (see Add). A turn the other way, or at or beyond the setting, is the oven cycling: it has got there.
+            var stepOnTheWay = Cooling ? tp.Kind == TurningKind.Trough && tp.C > SetpointC : tp.Kind == TurningKind.Peak && tp.C < SetpointC;
+            arrivalC = stepOnTheWay ? tp.C : null;
+            if (timeToSetpoint is null)
+            {
+                timeToSetpoint = tp.T; // an oven that runs cold turns round before it gets there
+                arrivalSetTime = true;
+            }
             if (tp.Kind == TurningKind.Peak && !Cooling)
                 overshootC = series.Range(tp.T - 30, tp.T + 30).Max - SetpointC;
         }
+        turningPoints.Add(tp);
 
         if (tp.Kind != TurningKind.Trough || Kind == UnitKind.Block) return;
 
@@ -224,9 +258,27 @@ public sealed class SetpointAnalyzer
         }
     }
 
+    /// <summary>The oven went on past the turn taken as getting there: back to heating, and what followed was the approach.</summary>
+    void WithdrawArrival()
+    {
+        DiscardedUnits += units.Count;
+        units.Clear();
+        cycleDurations.Clear();
+        approachTurns.AddRange(turningPoints);
+        turningPoints.Clear();
+        if (arrivalSetTime) timeToSetpoint = null;
+        arrivalSetTime = false;
+        arrivalC = null;
+        overshootC = null;
+        measuringStart = null;
+        Kind = null;
+        Phase = PointPhase.Heating;
+    }
+
     void CheckForNoCycling(double t)
     {
-        var lastTurn = turningPoints.Count > 0 ? turningPoints[^1].ConfirmedAt : 0;
+        // Any turn counts as the oven not being still, those set aside on the way there too.
+        var lastTurn = Math.Max(turningPoints.Count > 0 ? turningPoints[^1].ConfirmedAt : 0, approachTurns.Count > 0 ? approachTurns[^1].ConfirmedAt : 0);
         var quietFor = t - lastTurn;
         var noCycle = o.NoCycleMinutes * 60;
 
