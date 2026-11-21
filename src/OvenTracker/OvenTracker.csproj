@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -12,7 +12,8 @@
     <Company>The Schnauzer Group LLC</Company>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <Copyright>© The Schnauzer Group LLC</Copyright>
-    <Description>Checks an oven's temperature accuracy (bake and convection) with a Keysight U1253B over a U1177A Bluetooth adapter.</Description>
+    <Description>Checks an oven's temperature accuracy (bake and convection) with a connected multimeter and a type K thermocouple.</Description>
+    <ApplicationIcon>..\..\packaging\icon\oventracker.ico</ApplicationIcon>
     <InvariantGlobalization>true</InvariantGlobalization>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>
