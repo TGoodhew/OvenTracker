@@ -319,7 +319,7 @@ def test_drivers_are_found_by_name(name, kind):
 
 
 def test_the_meters_not_in_the_python_version_are_known_and_say_so():
-    for name in ("34401a", "34401A", "121gw"):
+    for name in ("121gw", "121GW"):
         d = drivers.find(name)
         assert d is not None and d.not_ported
         assert "isn't in the Python version yet" in d.not_ported_message
@@ -343,8 +343,11 @@ def test_the_driver_is_the_one_asked_for_then_the_last_one_then_the_default():
     simulated_last.remember("simulated", "simulator")
     assert choose_driver(RunSettings(), simulated_last).name == drivers.DEFAULT_NAME  # not a simulation again
     c_sharp_last = AppSettings()
-    c_sharp_last.remember("34401a", "GPIB0::22::INSTR")  # used last by the C# app
+    c_sharp_last.remember("121gw", "ble:121GW")  # used last by the C# app
     assert choose_driver(RunSettings(), c_sharp_last).name == drivers.DEFAULT_NAME
+    bench_last = AppSettings()
+    bench_last.remember("34401a", "GPIB0::22::INSTR")  # in both apps now
+    assert choose_driver(RunSettings(), bench_last).name == "34401a"
 
 
 def test_settings_from_before_drivers_still_find_the_serial_port(tmp_path):
@@ -356,16 +359,16 @@ def test_settings_from_before_drivers_still_find_the_serial_port(tmp_path):
     assert old.last_port is None
     # The same file as the C# app's: PascalCase, nulls left out.
     old.remember_auto_power_off_turned_off("u1253b:MY1")
-    old.remember_meter_options("34401a", {"rtd": "pt100-b"})
+    old.remember_meter_options("34401a", {"cj": "22C"})
     path = tmp_path / "settings.json"
     old.save(str(path))
     assert path.read_text(encoding="utf-8") == (
-        '{"LastMeter":"u1253b","LastResource":"COM9","AutoPowerOffTurnedOff":["u1253b:MY1"],"MeterOptions":{"34401a":{"rtd":"pt100-b"}}}'
+        '{"LastMeter":"u1253b","LastResource":"COM9","AutoPowerOffTurnedOff":["u1253b:MY1"],"MeterOptions":{"34401a":{"cj":"22C"}}}'
     )
     back = AppSettings.load(str(path))
     assert back.last_resource_for("u1253b") == "COM9"
     assert back.is_auto_power_off_turned_off("U1253B:my1")
-    assert back.meter_options_for("34401a") == {"rtd": "pt100-b"}
+    assert back.meter_options_for("34401a") == {"cj": "22C"}
 
 
 def test_the_simulator_is_a_driver_of_its_own():
@@ -385,7 +388,7 @@ def test_sensor_tolerances_follow_the_standard_limits(kind, c, expected):
 
 
 def test_meter_options_are_key_value():
-    assert drivers.parse_options(["rtd=pt100-b", "nplc=100, X=1"]) == {"rtd": "pt100-b", "nplc": "100", "x": "1"}
-    assert drivers.parse_options(["rtd"]) is None
+    assert drivers.parse_options(["cj=22C", "nplc=100, X=1"]) == {"cj": "22C", "nplc": "100", "x": "1"}
+    assert drivers.parse_options(["cj"]) is None
     assert drivers.parse_options(None) == {}
-    assert U1253BDriver().check_options({"rtd": "x"}) == "The u1253b meter takes no --meter-option."
+    assert U1253BDriver().check_options({"cj": "x"}) == "The u1253b meter takes no --meter-option."

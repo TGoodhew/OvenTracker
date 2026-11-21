@@ -16,11 +16,13 @@ classifiers = [
     "Operating System :: OS Independent",
     "Topic :: Scientific/Engineering",
 ]
-# rich draws the console; pyserial is imported only when a serial meter (the U1253B) is used, so the simulator
-# runs without it. The analysis itself needs only the standard library.
+# rich draws the console; pyserial is imported only when a serial meter (the U1253B, or the 34401A on RS-232) is
+# used, so the simulator runs without it. The analysis itself needs only the standard library.
 dependencies = ["rich>=13", "pyserial>=3.5"]
 
 [project.optional-dependencies]
+# PyVISA, for the 34401A on GPIB: imported only when a VISA resource is used, so everything else runs without it.
+visa = ["pyvisa>=1.13"]
 test = ["pytest"]
 
 [project.scripts]

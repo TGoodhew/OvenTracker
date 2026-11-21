@@ -15,9 +15,18 @@ Spectre.Console. It runs on Python 3.11 or later, on Windows, Linux and macOS.
 
 The meters:
 - **Keysight U1253B:** through a U1177A Bluetooth adapter or a U1173 cable, on a serial port (through pyserial).
+- **HP/Agilent 34401A with a type K thermocouple:** `--meter 34401a`, on GPIB (`--resource GPIB0::22::INSTR`)
+  or RS-232 (`--resource COM3`, through pyserial). It reads the thermocouple's voltage on the 100 mV DC range
+  and converts it with the NIST type K reference function, as the C# app does.
+  - Give the cold junction's temperature (the room's, where the thermocouple meets the meter's terminals) with
+    `--meter-option cj=22C` or `cj=72F`. Without it the app assumes 23 °C and says so.
+  - `--meter-option nplc=` sets the integration time.
+  - Both are remembered, and the run's `session.json` records them (`meterOptions`).
+  - GPIB goes through PyVISA, an optional extra: `pip install "./python[visa]"`, with a VISA library (NI-VISA
+    or Keysight IO Libraries Suite) installed. Without them, the app says what's missing.
+  - The main README's "The 34401A with a type K thermocouple" section has the rest.
 - **The simulator:** `--simulate`.
-- **Not here yet:** the C# app's other drivers, the HP 34401A and the EEVblog 121GW (issues #38 and #39).
-  `--meter 34401a` and `--meter 121gw` say so.
+- **Not here yet:** the C# app's EEVblog 121GW driver (issue #39). `--meter 121gw` says so.
 
 ## Install
 
@@ -27,7 +36,8 @@ From a clone of the repository:
 pip install ./python          # or, to keep it apart from other packages: pipx install ./python
 ```
 
-It needs `rich` and `pyserial`, which pip installs. On Linux the U1177A pairs and binds as for the C# app; see
+It needs `rich` and `pyserial`, which pip installs. For a 34401A on GPIB, add PyVISA with
+`pip install "./python[visa]"`. On Linux the U1177A pairs and binds as for the C# app; see
 the main README's Linux section.
 
 ## Try it without a meter

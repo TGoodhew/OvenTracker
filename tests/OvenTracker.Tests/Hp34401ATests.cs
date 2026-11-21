@@ -1,65 +1,64 @@
+using System.Globalization;
 using OvenTracker.Meter;
 using OvenTracker.Session;
 
 namespace OvenTracker.Tests;
 
-public class RtdTests
+public class TypeKTests
 {
-    // IEC 60751 PT100 table values (Ω at °C).
+    // NIST ITS-90 type K reference table, reference junction at 0 °C (mV at °C).
     [Theory]
-    [InlineData(0, 100.00)]
-    [InlineData(100, 138.51)]
-    [InlineData(200, 175.86)]
-    [InlineData(260, 197.71)]
-    [InlineData(300, 212.05)]
-    [InlineData(-50, 80.31)]
-    [InlineData(-100, 60.26)]
-    public void MatchesTheIecTable(double c, double ohms)
+    [InlineData(-200, -5.891)]
+    [InlineData(-50, -1.889)]
+    [InlineData(0, 0.000)]
+    [InlineData(25, 1.000)]
+    [InlineData(100, 4.096)]
+    [InlineData(200, 8.138)]
+    [InlineData(260, 10.561)]
+    [InlineData(300, 12.209)]
+    [InlineData(500, 20.644)]
+    [InlineData(1000, 41.276)]
+    [InlineData(1372, 54.886)]
+    public void MatchesTheNistTable(double c, double mv)
     {
-        Assert.Equal(ohms, Rtd.Pt100A.ResistanceAt(c), 2);
-        Assert.Equal(c, Rtd.Pt100A.TemperatureFor(ohms), 1); // the table is rounded to 0.01 Ω, about 0.03 °C
+        Assert.Equal(mv, TypeK.MillivoltsAt(c), 3);
+        Assert.Equal(c, TypeK.TemperatureFor(mv, 0)!.Value, 1); // the table is rounded to 1 µV, about 0.03 °C
     }
 
     [Theory]
-    [InlineData(-150.0)]
-    [InlineData(-12.5)]
-    [InlineData(0.0)]
-    [InlineData(176.67)]
-    [InlineData(232.22)]
-    [InlineData(500.0)]
-    public void ConvertsBothWays(double c)
+    [InlineData(176.67, 23.0)]
+    [InlineData(232.22, 18.5)]
+    [InlineData(-10.0, 22.0)]
+    [InlineData(500.0, 0.0)]
+    public void TheColdJunctionIsAddedBack(double hot, double coldJunction)
     {
-        Assert.Equal(c, Rtd.Pt100A.TemperatureFor(Rtd.Pt100A.ResistanceAt(c)), 6);
-        var pt1000 = new Rtd(1000, RtdClass.B);
-        Assert.Equal(c, pt1000.TemperatureFor(pt1000.ResistanceAt(c)), 6);
+        // The meter sees only the difference between the two junctions.
+        var measured = TypeK.MillivoltsAt(hot) - TypeK.MillivoltsAt(coldJunction);
+        Assert.Equal(hot, TypeK.TemperatureFor(measured, coldJunction)!.Value, 6);
     }
 
     [Fact]
-    public void ClassesGiveTheirTolerance()
+    public void AColdJunctionErrorShowsInTheReading()
     {
-        Assert.Equal(0.15 + 0.002 * 200, Rtd.Pt100A.Sensor.ToleranceC(200), 9);
-        Assert.Equal(0.3 + 0.005 * 200, Rtd.Parse("pt100-b")!.Sensor.ToleranceC(200), 9);
-        Assert.Equal("PT100 RTD (class A)", Rtd.Pt100A.Sensor.Name);
-        Assert.False(Rtd.Pt100A.Sensor.IsGenericType);
+        // Assuming 23 °C when the room is 28 °C reads about 5 °C low: the reason cj matters.
+        var measured = TypeK.MillivoltsAt(200) - TypeK.MillivoltsAt(28);
+        Assert.Equal(195, TypeK.TemperatureFor(measured, 23)!.Value, 0);
     }
 
     [Theory]
-    [InlineData("pt100", 100, RtdClass.A)]
-    [InlineData("PT100-B", 100, RtdClass.B)]
-    [InlineData("pt1000-aa", 1000, RtdClass.AA)]
-    [InlineData(" pt500-a ", 500, RtdClass.A)]
-    public void Parses(string text, double r0, RtdClass cls) => Assert.Equal(new Rtd(r0, cls), Rtd.Parse(text));
-
-    [Theory]
-    [InlineData("")]
-    [InlineData("pt200")]
-    [InlineData("pt100-c")]
-    [InlineData("type-k")]
-    public void RejectsOthers(string text) => Assert.Null(Rtd.Parse(text));
+    [InlineData(60.0)]
+    [InlineData(-8.0)] // with the cold junction at 23 °C, below −270 °C
+    public void BeyondTypeKIsNoTemperature(double mv) => Assert.Null(TypeK.TemperatureFor(mv, 23));
 }
 
 public class Hp34401ATests
 {
+    static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
+
+    /// <summary>The 34401A's reply at a temperature, with the cold junction at another: volts, as READ? gives them.</summary>
+    static string VoltsAt(double hotC, double coldJunctionC) =>
+        ((TypeK.MillivoltsAt(hotC) - TypeK.MillivoltsAt(coldJunctionC)) / 1000).ToString("+0.00000000E+00;-0.00000000E+00", Inv);
+
     /// <summary>A 34401A that answers from a table, and remembers what it was sent.</summary>
     sealed class FakeScpi(bool serial = false) : IScpiPort
     {
@@ -69,8 +68,8 @@ public class Hp34401ATests
             ["*IDN?"] = () => "HEWLETT-PACKARD,34401A,0,11-5-2",
             ["*OPC?"] = () => "1",
             ["SYST:ERR?"] = () => "+0,\"No error\"",
-            ["CONF?"] = () => "\"FRES +1.000000E+03,+1.000000E-04\"",
-            ["READ?"] = () => "+1.38510000E+02",
+            ["CONF?"] = () => "\"VOLT +1.000000E-01,+3.000000E-07\"",
+            ["READ?"] = () => VoltsAt(200, 23),
         };
         readonly Queue<string> pending = new();
         public bool Released { get; private set; }
@@ -92,24 +91,28 @@ public class Hp34401ATests
     }
 
     [Fact]
-    public void SetsUpFourWireOhmsAndReadsATemperature()
+    public void SetsUpDcMillivoltsAndReadsATypeKTemperature()
     {
         var port = new FakeScpi();
-        using var meter = new Hp34401AMeter(port, Rtd.Pt100A);
+        using var meter = new Hp34401AMeter(port, coldJunctionC: 23);
         var id = meter.Connect();
         Assert.Equal("34401A", id.Model);
         Assert.Equal("HEWLETT-PACKARD", id.Manufacturer);
         Assert.Contains("*RST", port.Sent);
-        Assert.Contains("CONF:FRES 1E+3", port.Sent);
-        Assert.Contains("FRES:NPLC 10", port.Sent);
+        Assert.Contains("CONF:VOLT:DC 0.1", port.Sent);
+        Assert.Contains("VOLT:DC:NPLC 10", port.Sent);
+        Assert.Contains("INP:IMP:AUTO ON", port.Sent); // > 10 GΩ, so the thermocouple isn't loaded
         Assert.DoesNotContain("SYST:REM", port.Sent); // GPIB doesn't need it
 
         var r = meter.Read();
         Assert.Equal(ReadingStatus.Ok, r.Status);
-        Assert.Equal(100, r.Celsius!.Value, 1);
-        Assert.Equal("+1.38510000E+02", r.Raw);
+        Assert.Equal(200, r.Celsius!.Value, 2);
+        Assert.Equal(VoltsAt(200, 23), r.Raw);
         Assert.True(meter.LastConfig!.IsTemperature);
-        Assert.Equal(Rtd.Pt100A.Sensor, meter.LastConfig.Sensor);
+        // A generic type K: --probe says which probe, as for any meter.
+        Assert.Equal(Sensor.Thermocouple("K"), meter.LastConfig.Sensor);
+        Assert.True(meter.LastConfig.Sensor!.IsGenericType);
+        Assert.Contains("cold junction 23.0 °C", meter.LastConfig.Description);
 
         meter.Disconnect();
         Assert.True(port.Released);
@@ -119,7 +122,7 @@ public class Hp34401ATests
     public void PutsItInRemoteFirstOverRs232()
     {
         var port = new FakeScpi(serial: true);
-        using var meter = new Hp34401AMeter(port, Rtd.Pt100A);
+        using var meter = new Hp34401AMeter(port, 23);
         meter.Connect();
         Assert.Equal("SYST:REM", port.Sent[0]);
     }
@@ -129,9 +132,10 @@ public class Hp34401ATests
     {
         var port = new FakeScpi();
         port.Replies["*IDN?"] = () => "HEWLETT-PACKARD,3478A,0,1";
-        using var meter = new Hp34401AMeter(port, Rtd.Pt100A);
+        using var meter = new Hp34401AMeter(port, 23);
         Assert.False(Hp34401AMeter.Is34401A(meter.Connect()));
         Assert.Equal(["*IDN?"], port.Sent);
+        Assert.True(port.Released); // given its front panel back
     }
 
     [Fact]
@@ -139,38 +143,34 @@ public class Hp34401ATests
     {
         var port = new FakeScpi();
         port.Replies["SYST:ERR?"] = () => "-113,\"Undefined header\"";
-        using var meter = new Hp34401AMeter(port, Rtd.Pt100A);
+        using var meter = new Hp34401AMeter(port, 23);
         var ex = Assert.Throws<MeterException>(() => meter.Connect());
         Assert.Contains("Undefined header", ex.Message);
     }
 
     [Fact]
-    public void AnOpenRtdIsAnOverloadAndAShortAnError()
+    public void AnOverloadIsOpenAndBeyondTypeKIsAnError()
     {
         var t = DateTimeOffset.UnixEpoch;
-        Assert.Equal(ReadingStatus.Overload, Hp34401AMeter.ToReading(t, "+9.90000000E+37", Rtd.Pt100A).Status);
-        Assert.Equal(ReadingStatus.Error, Hp34401AMeter.ToReading(t, "+1.20000000E+00", Rtd.Pt100A).Status);
-        Assert.Equal(ReadingStatus.Error, Hp34401AMeter.ToReading(t, "garbage", Rtd.Pt100A).Status);
+        Assert.Equal(ReadingStatus.Overload, Hp34401AMeter.ToReading(t, "+9.90000000E+37", 23).Status);
+        Assert.Equal(ReadingStatus.Error, Hp34401AMeter.ToReading(t, "+6.00000000E-02", 23).Status); // 60 mV
+        Assert.Equal(ReadingStatus.Error, Hp34401AMeter.ToReading(t, "garbage", 23).Status);
+        Assert.Equal(ReadingStatus.Error, Hp34401AMeter.ToReading(t, "NaN", 23).Status); // not a temperature, even though it parses
     }
 
-    [Fact]
-    public void NoticesWhenSomeoneChangesTheFunction()
+    [Theory]
+    [InlineData("\"VOLT:AC +1.000000E+01,+3.000000E-06\"")]
+    [InlineData("\"FRES +1.000000E+03,+1.000000E-04\"")]
+    public void NoticesWhenSomeoneChangesTheFunction(string conf)
     {
         var port = new FakeScpi();
-        using var meter = new Hp34401AMeter(port, Rtd.Pt100A) { ConfigEvery = 2 };
+        using var meter = new Hp34401AMeter(port, 23) { ConfigEvery = 2 };
         meter.Connect();
-        port.Replies["CONF?"] = () => "\"VOLT +1.000000E+01,+3.000000E-06\"";
+        port.Replies["CONF?"] = () => conf;
         meter.Read();
         var r = meter.Read();
         Assert.Equal(ReadingStatus.NotTemperature, r.Status);
         Assert.False(meter.LastConfig!.IsTemperature);
-    }
-
-    [Fact]
-    public void ChoosesARangeForTheRtd()
-    {
-        Assert.Equal(1e3, new Hp34401AMeter(new FakeScpi(), Rtd.Pt100A).Range);
-        Assert.Equal(1e4, new Hp34401AMeter(new FakeScpi(), new Rtd(1000, RtdClass.A)).Range);
     }
 
     [Fact]
@@ -179,7 +179,7 @@ public class Hp34401ATests
         var driver = MeterDrivers.Find("34401a")!;
         Assert.IsType<Hp34401ADriver>(driver);
         Assert.Null(driver.AutoPowerOff);
-        using var meter = new Hp34401AMeter(new FakeScpi(), Rtd.Pt100A);
+        using var meter = new Hp34401AMeter(new FakeScpi(), 23);
         Assert.Null(((ITemperatureMeter)meter).ReadBatteryPercent());
     }
 
@@ -199,26 +199,49 @@ public class Hp34401ATests
         Assert.Null(new Hp34401ADriver().Open(new MeterRequest(null, null, 1)));
     }
 
+    [Theory]
+    [InlineData("22C", 22.0)]
+    [InlineData("22.5 °C", 22.5)]
+    [InlineData("72F", 22.222222222222221)]
+    [InlineData("0c", 0.0)]
+    public void ReadsTheColdJunctionWithItsUnit(string text, double c) =>
+        Assert.Equal(c, Hp34401ADriver.ParseTemperatureC(text)!.Value, 9);
+
+    [Theory]
+    [InlineData("22")]      // no unit: 22 °F or 22 °C?
+    [InlineData("350F")]    // an oven, not a room
+    [InlineData("warm")]
+    public void RefusesAColdJunctionItCantBeSureOf(string text) => Assert.Null(Hp34401ADriver.ParseTemperatureC(text));
+
     [Fact]
     public void ChecksItsOptions()
     {
         var d = new Hp34401ADriver();
-        Assert.Null(d.CheckOptions(new Dictionary<string, string> { ["rtd"] = "pt100-b", ["nplc"] = "100" }));
-        Assert.Contains("rtd=pt42", d.CheckOptions(new Dictionary<string, string> { ["rtd"] = "pt42" }));
+        Assert.Null(d.CheckOptions(new Dictionary<string, string> { ["cj"] = "22C", ["nplc"] = "100" }));
+        Assert.Contains("cj=22", d.CheckOptions(new Dictionary<string, string> { ["cj"] = "22" }));
         Assert.Contains("nplc=3", d.CheckOptions(new Dictionary<string, string> { ["nplc"] = "3" }));
-        Assert.Contains("no --meter-option range", d.CheckOptions(new Dictionary<string, string> { ["range"] = "1k" }));
-        Assert.Contains("takes no --meter-option", MeterDrivers.Find("u1253b")!.CheckOptions(new Dictionary<string, string> { ["rtd"] = "pt100" }));
+        // The PT100 setting is gone.
+        Assert.Contains("no --meter-option rtd", d.CheckOptions(new Dictionary<string, string> { ["rtd"] = "pt100" }));
+        Assert.Contains("takes no --meter-option", MeterDrivers.Find("u1253b")!.CheckOptions(new Dictionary<string, string> { ["cj"] = "22C" }));
+        Assert.Equal(["cj", "nplc"], d.Options.Select(o => o.Key));
+    }
+
+    [Fact]
+    public void SaysWhenTheColdJunctionIsAssumed()
+    {
+        Assert.Contains("23 °C", Hp34401ADriver.AssumedColdJunctionNote);
+        Assert.Contains("cj=", Hp34401ADriver.AssumedColdJunctionNote);
     }
 
     [Fact]
     public void ParsesMeterOptions()
     {
-        var o = MeterDrivers.ParseOptions(["RTD=pt100-b", "nplc=100,x=1"])!;
-        Assert.Equal("pt100-b", o["rtd"]);
+        var o = MeterDrivers.ParseOptions(["CJ=22C", "nplc=100,x=1"])!;
+        Assert.Equal("22C", o["cj"]);
         Assert.Equal("100", o["nplc"]);
         Assert.Equal("1", o["x"]);
         Assert.Empty(MeterDrivers.ParseOptions(null)!);
-        Assert.Null(MeterDrivers.ParseOptions(["rtd"]));
+        Assert.Null(MeterDrivers.ParseOptions(["cj"]));
         Assert.Null(MeterDrivers.ParseOptions(["=1"]));
     }
 
@@ -226,11 +249,23 @@ public class Hp34401ATests
     public void RemembersOptionsPerMeter()
     {
         var s = new AppSettings();
-        s.RememberMeterOptions("34401a", new Dictionary<string, string> { ["rtd"] = "pt100-b" });
-        Assert.Equal("pt100-b", s.MeterOptionsFor("34401a")["rtd"]);
+        s.RememberMeterOptions("34401a", new Dictionary<string, string> { ["cj"] = "22C" });
+        Assert.Equal("22C", s.MeterOptionsFor("34401a")["cj"]);
         Assert.Empty(s.MeterOptionsFor("u1253b"));
         s.RememberMeterOptions("34401a", new Dictionary<string, string>());
         Assert.Empty(s.MeterOptionsFor("34401a"));
+    }
+
+    [Fact]
+    public void TheRunRecordsTheMeterOptionsItUsed()
+    {
+        // The cold junction moves every reading, so session.json says what it was; nothing is written without options.
+        var info = new SessionInfo("test", DateTimeOffset.UnixEpoch, "HEWLETT-PACKARD 34401A", "GPIB0::22::INSTR", TempUnit.Fahrenheit, 8,
+            new OvenTracker.Analysis.AnalysisOptions(), [], MeterOptions: new Dictionary<string, string> { ["cj"] = "22C" });
+        var json = System.Text.Json.JsonSerializer.Serialize(info, Json.Options);
+        Assert.Contains("\"meterOptions\": {", json);
+        Assert.Contains("\"cj\": \"22C\"", json);
+        Assert.DoesNotContain("meterOptions", System.Text.Json.JsonSerializer.Serialize(info with { MeterOptions = null }, Json.Options));
     }
 
     [Fact]

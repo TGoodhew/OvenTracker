@@ -223,6 +223,7 @@ the PC's local offset and up to seven fractional digits, trailing zeros dropped:
 | `sittings` | array of timestamps | no | When each sitting started: the first, then each resume. |
 | `oven` | [OvenProfile](#ovenprofile) | no | The oven's profile, as it was for this run. |
 | `characterise` | [CharacteriseInfo](#characteriseinfo) | no | For a characterise run. |
+| `meterOptions` | object of string → string | no | The driver's `--meter-option` settings the run used, e.g. `{ "cj": "22C" }` for the 34401A's cold junction. Left out when there were none. |
 
 ### TestPoint
 
@@ -269,7 +270,7 @@ Every field is always written. A reader should take the default for any that is 
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
-| `name` | string | yes | For people, e.g. `type K thermocouple`, `Fluke 80BK-A type K probe`, `PT100 RTD (class A)`. |
+| `name` | string | yes | For people, e.g. `type K thermocouple`, `Fluke 80BK-A type K probe`. |
 | `limitC` | number, °C | yes | The fixed part of the tolerance. |
 | `limitFraction` | number | yes | The proportional part, as a fraction of the temperature in °C (0.0075 is 0.75 %). |
 | `limitsAdd` | boolean | yes | True: the tolerance is `limitC + limitFraction·|T|` (RTD classes). False: the greater of the two (thermocouples). |

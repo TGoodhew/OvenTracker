@@ -34,7 +34,7 @@ public static class Visa
     public static bool IsAvailable => Handle.Value != IntPtr.Zero;
 
     public static string MissingHelp => OperatingSystem.IsWindows()
-        ? $"VISA isn't installed (no {Candidates[0]}). For GPIB, install NI-VISA (with NI-488.2 for an NI adapter) or Keysight IO Libraries Suite, 64-bit."
+        ? $"VISA isn't installed (no {Candidates[0]}). For GPIB, install NI-VISA (with NI-488.2 for an NI adapter) or Keysight IO Libraries Suite, {(Environment.Is64BitProcess ? "64-bit" : "32-bit")}."
         : $"VISA isn't installed (none of {string.Join(", ", Candidates)}). For GPIB on Linux, install NI-VISA with NI-488.2 (or linux-gpib with a VISA that uses it).";
 
     // Status codes and attributes, from visa.h.

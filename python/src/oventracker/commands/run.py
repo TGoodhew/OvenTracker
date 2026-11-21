@@ -83,7 +83,7 @@ class RunSettings(SharedSettings):
                 "/dev/ttyUSB0, GPIB0::22::INSTR, ble:C4:BE:84:12:34:56."
             )
         if drivers.parse_options(self.meter_options) is None:
-            return "--meter-option takes key=value, e.g. --meter-option rtd=pt100-b."
+            return "--meter-option takes key=value, e.g. --meter-option cj=22C."
         if self.port is not None and self.resource is not None and self.port.lower() != self.resource.lower():
             return "Give the meter's location once, with --resource."
         if self.unit is not None and parse_unit(self.unit) is None:
@@ -387,25 +387,37 @@ def _execute(s: RunSettings, token: CancellationToken) -> int:
     app_settings = AppSettings.load()
     # The oven: the one asked for, the saved run's, the one used last time, or the generic one.
     resumed_oven = None
+    resumed_run = None
     if s.resume is not None:
-        r0 = load_run(s.resume)
-        resumed_oven = r0.info.oven if r0 is not None else None
+        resumed_run = load_run(s.resume)
+        resumed_oven = resumed_run.info.oven if resumed_run is not None else None
     oven_profile = ovens.find(s.oven) or resumed_oven or ovens.find(app_settings.last_oven) or ovens.DEFAULT
     driver = choose_driver(s, app_settings)
     resource = s.resource if s.resource is not None else s.port
-    # The driver's own settings: those given, or the ones used with it last time.
+    # The driver's own settings: those given; when resuming, the run's own (a cold junction, say, shouldn't change
+    # between sittings unless asked); otherwise the ones used with this meter last time (RunCommand).
     given_options = drivers.parse_options(s.meter_options) or {}
-    meter_options = given_options if given_options else app_settings.meter_options_for(driver.name)
+    run_options = resumed_run.info.meter_options if resumed_run is not None else None
+    meter_options = (
+        given_options if given_options else dict(run_options) if run_options else app_settings.meter_options_for(driver.name)
+    )
+    forgotten: str | None = None
     bad_option = driver.check_options(meter_options)
     if bad_option is not None:
-        c.print(f"[red]{ui.escape(bad_option)}[/]")
-        return 1
+        if given_options:
+            c.print(f"[red]{ui.escape(bad_option)}[/]")
+            return 1
+        # Remembered from an earlier version of the driver (the 34401A's rtd=, say): not worth stopping a run over.
+        forgotten = f"The settings remembered for this meter no longer apply, so they're forgotten: {bad_option}"
+        meter_options = {}
     if isinstance(driver, NotPortedDriver):
         c.print(f"[red]{ui.escape(driver.not_ported_message)}[/]")
         return 1
     c.print(FigletText("OvenTracker", "orange1"))
     c.print(f"[grey]v{__version__} · oven temperature accuracy · {ui.escape(driver.description)}[/]")
     c.print()
+    if forgotten is not None:
+        c.print(f"[yellow]{ui.escape(forgotten)}[/]")
 
     # 1. The meter.
     found: ProbeResult | None = _status(
@@ -437,6 +449,8 @@ def _execute(s: RunSettings, token: CancellationToken) -> int:
         app_settings.remember_meter_options(driver.name, meter_options)
         app_settings.save()
         c.print(f"[green]Connected[/] to {ui.escape(str(identity))} on {ui.escape(found.resource)}.")
+        for note in found.notes or []:
+            c.print(f"[yellow]{ui.escape(note)}[/]")
         config = meter.read_config()
         if config is not None and not config.is_temperature:
 
@@ -674,6 +688,7 @@ def _execute(s: RunSettings, token: CancellationToken) -> int:
         out_dir = resumed.folder
         info = replace(
             resumed.info,
+            meter_options=dict(meter_options) if meter_options else resumed.info.meter_options,
             adjustment_c=adjustment_c,
             adjust=s.build_options(unit, resumed.info.adjust, oven_profile),
             oven=oven_profile,
@@ -703,6 +718,7 @@ def _execute(s: RunSettings, token: CancellationToken) -> int:
             CharacteriseInfo(f.delta_from_display(s.step), adjustment_c if adjustment_c is not None else 0.0)
             if isinstance(s, CharacteriseSettings)
             else None,
+            dict(meter_options) if meter_options else None,
         )
     if not driver.is_simulation:
         app_settings.last_oven = oven_profile.key
@@ -717,6 +733,9 @@ def _execute(s: RunSettings, token: CancellationToken) -> int:
         )
     if resumed is not None:
         recorder.note(recorder.now, "resume")
+        # What this sitting used, in the readings: session.json has room for one set, and a resumed run may have been given others.
+        if meter_options:
+            recorder.note(recorder.now, "meter-options:" + ";".join(f"{k}={v}" for k, v in sorted(meter_options.items())))
     poller = MeterPoller(meter, s.interval, s.speed if driver.is_simulation else 1, connected=True)
     poller.start()
 

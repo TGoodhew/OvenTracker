@@ -33,12 +33,14 @@ class MeterOption:
 
 @dataclass(frozen=True)
 class ProbeResult:
-    """The outcome of asking one place for a meter. ``meter`` is the connected meter, when asked to keep it open."""
+    """The outcome of asking one place for a meter. ``meter`` is the connected meter, when asked to keep it open.
+    ``notes``: anything worth telling people on connecting, e.g. a setting that was assumed. Plain text."""
 
     resource: str
     identity: MeterIdentity | None
     error: str | None
     meter: TemperatureMeter | None = None
+    notes: list[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -106,7 +108,7 @@ class NotPortedDriver(MeterDriver):
     def not_ported_message(self) -> str:
         return (
             f"The {self.name} meter ({self.description}) isn't in the Python version yet: use the C# app "
-            "(oventracker) for it, or another kind of meter with --meter (u1253b or simulated)."
+            "(oventracker) for it, or another kind of meter with --meter (u1253b, 34401a or simulated)."
         )
 
     @property
@@ -132,16 +134,13 @@ def all_drivers() -> list[MeterDriver]:
     """The meters the app knows, in the C# app's order."""
     global _ALL
     if _ALL is None:
+        from .hp34401a import Hp34401ADriver
         from .simulated import SimulatedDriver
         from .u1253b import U1253BDriver
 
         _ALL = [
             U1253BDriver(),
-            NotPortedDriver(
-                "34401a",
-                "HP/Agilent 34401A with a PT100 RTD (4-wire), through GPIB or RS-232",
-                "a GPIB address through VISA, e.g. GPIB0::22::INSTR (or gpib:22), or a serial port",
-            ),
+            Hp34401ADriver(),
             NotPortedDriver(
                 "121gw",
                 "EEVblog 121GW over Bluetooth LE",
@@ -164,7 +163,7 @@ def names() -> str:
 
 
 def parse_options(given: Iterable[str] | None) -> dict[str, str] | None:
-    """Reads --meter-option values ("rtd=pt100-b", or several separated by commas). None if one isn't key=value."""
+    """Reads --meter-option values ("cj=22C", or several separated by commas). None if one isn't key=value."""
     options: dict[str, str] = {}
     for g in given or []:
         for item in (p.strip() for p in g.split(",")):
