@@ -174,7 +174,12 @@ a callback.
 
 - **Windows:** `WindowsGattLink` uses the Win32 Bluetooth GATT API, which works with paired devices, and
   keeps the app on plain .NET, which the WinRT API wouldn't allow. `BleLinks.List()` lists the paired devices.
-- **Linux:** not yet (issue #34). `BleLinks.IsSupported` says so, and a driver should return
+- **Linux:** `BlueZLink` talks to BlueZ over the system D-Bus with Tmds.DBus.Protocol, which is pure managed
+  code. It finds the device among BlueZ's objects (`GetManagedObjects`), connects, waits for the services, and
+  subscribes with `StartNotify`. Values arrive as `PropertiesChanged` signals. `BleLinks.List()` lists the
+  devices BlueZ knows. `BleLinks.Scan()` scans for a few seconds first; on Windows it's the same as `List()`.
+  The parsing of BlueZ's object tree is in static functions, tested in `BlueZTests`.
+- **Elsewhere** (macOS): not yet. `BleLinks.IsSupported` says so, and a driver should return
   `BleLinks.NotSupportedHelp` as its error.
 
 A streaming meter (one that sends without being asked) keeps the latest packet. Its `Read` waits for a newer

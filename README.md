@@ -94,6 +94,9 @@ The binding doesn't survive a restart, so run `rfcomm bind` again after one. A U
 as `/dev/ttyUSB0` instead; give it with `--resource /dev/ttyUSB0`. `OvenTracker meters` lists the serial
 devices it can see.
 
+An EEVblog 121GW connects by Bluetooth LE through BlueZ instead, with no binding needed; see
+[The EEVblog 121GW](#the-eevblog-121gw).
+
 On Linux, runs are saved to `~/Documents/OvenTracker` (or `~/OvenTracker` if there is no `~/Documents`).
 The app remembers the last meter in `~/.config/OvenTracker`.
 
@@ -267,7 +270,7 @@ Each kind of meter has a driver in `src/OvenTracker/Meter`. Four come with the a
 | --- | --- | --- |
 | `u1253b` (the default) | A Keysight U1253B (or another U1250-series meter) through a U1177A Bluetooth adapter or a U1173 cable | A serial port: `COM5` on Windows, `/dev/rfcomm0` on Linux (9600 8N1, or give settings: `COM5:9600,N,8,1`). Left out, the app tries the port that worked last time, then each Bluetooth link. |
 | `34401a` | An HP / Agilent / Keysight 34401A bench DMM reading a PT100 RTD by 4-wire resistance (see below) | `GPIB0::22::INSTR` (or `gpib:22`) through VISA, or a serial port for its RS-232 port: `COM3`, `/dev/ttyUSB0` (9600, even parity, 7 data bits, 2 stop bits from the factory, or give settings: `COM3:9600,N,8,2`). Required the first time, then remembered. |
-| `121gw` | An EEVblog 121GW with a type K thermocouple, over Bluetooth LE (Windows only, for now) | `ble:C4:BE:84:12:34:56` or `ble:121GW`. Left out, the app tries the one that answered last time, then each paired 121GW. |
+| `121gw` | An EEVblog 121GW with a type K thermocouple, over Bluetooth LE (Windows and Linux) | `ble:C4:BE:84:12:34:56` or `ble:121GW`. Left out, the app tries the one that answered last time, then each 121GW the system knows (on Linux it scans if there's none). |
 | `simulated` | A made-up oven and meter. `--simulate` is short for `--meter simulated`. | Not used. |
 
 Without `--meter` the app uses the meter that answered last time, or the U1253B. `oventracker meters` lists what
@@ -325,15 +328,18 @@ The 121GW streams its display over Bluetooth LE, about twice a second. The app t
 in °C or °F as the meter shows it, with a type K thermocouple.
 
 ```powershell
-OvenTracker.exe meters --meter 121gw          # the paired Bluetooth LE devices; a 121GW is marked
-OvenTracker.exe run --meter 121gw             # finds the paired 121GW by itself
+OvenTracker.exe meters --meter 121gw          # the Bluetooth LE devices it knows; a 121GW is marked
+OvenTracker.exe run --meter 121gw             # finds the 121GW by itself
 ```
 
-- **Pair it first** in Windows Bluetooth settings (Add device, Bluetooth, then 121GW), with Bluetooth on at
-  the meter (BT shows on its display). The app uses Windows' Bluetooth LE (GATT) API, which works with paired
-  devices.
-- **Linux** isn't supported yet: the app says so. Adding it through BlueZ is
-  [issue #34](https://github.com/TGoodhew/OvenTracker/issues/34).
+- **Bluetooth on at the meter:** BT shows on its display. Holding the 1ms PEAK button turns it on or off.
+- **On Windows, pair it first** in Windows Bluetooth settings (Add device, Bluetooth, then 121GW). The app
+  uses Windows' Bluetooth LE (GATT) API, which works with paired devices.
+- **On Linux** the app goes through BlueZ over D-Bus, so `bluetoothd` must be running
+  (`sudo systemctl enable --now bluetooth`). No pairing is needed: the app scans for a few seconds when BlueZ
+  doesn't know a 121GW yet. To skip the scan, make it known once: `bluetoothctl`, `scan on`, wait for 121GW,
+  then `trust <address>`. If BlueZ refuses access, add yourself to the `bluetooth` group. WSL has no
+  Bluetooth.
 - **Only plain temperature counts:** with HOLD, REL or MIN/MAX on, the display isn't the live temperature, so
   the app waits as it does for the wrong dial position.
 - **The unit flags:** firmware 1.21 and later tell the app whether the meter shows °C or °F. An older meter is

@@ -137,7 +137,7 @@ public class Eevblog121GwTests
     }
 
     [Fact]
-    public void TheMeterConnectsAndReadsEachPacketOnce()
+    public async Task TheMeterConnectsAndReadsEachPacketOnce()
     {
         var link = new FakeLink();
         using var meter = new Eevblog121GwMeter(link) { Timeout = TimeSpan.FromSeconds(2) };
@@ -147,7 +147,7 @@ public class Eevblog121GwTests
             link.Send(Packet(5, 0x20, 1800, b15: 0x06));
         });
         var id = meter.Connect();
-        feeder.Wait();
+        await feeder;
         Assert.Equal("121GW", id.Model);
         Assert.Equal("17842121", id.Serial);
         Assert.Equal("ble:C4:BE:84:12:34:56", meter.Location);
@@ -157,10 +157,10 @@ public class Eevblog121GwTests
         // The first reading is the packet that arrived while connecting; after that, Read waits for a newer one.
         Assert.Equal(180.0, meter.Read().Celsius!.Value, 6);
         var reading = Task.Run(meter.Read);
-        Thread.Sleep(100);
+        await Task.Delay(100);
         Assert.False(reading.IsCompleted);
         link.Send(Packet(5, 0x20, 1812, b15: 0x04));
-        Assert.Equal(181.2, reading.Result.Celsius!.Value, 6);
+        Assert.Equal(181.2, (await reading).Celsius!.Value, 6);
         Assert.Equal(AutoPowerOffState.Off, meter.ReadAutoPowerOff().State);
         Assert.Null(((ITemperatureMeter)meter).ReadBatteryPercent());
     }
@@ -200,14 +200,13 @@ public class Eevblog121GwTests
     public void NormalizesAddresses(string text, string? expected) => Assert.Equal(expected, BleLinks.NormalizeAddress(text));
 
     [Fact]
-    public void ItsAutoPowerOffIsKnownAndOnLinuxItSaysWhy()
+    public void ItsAutoPowerOffIsKnownAndBluetoothLeWorksOnWindowsAndLinux()
     {
         var driver = MeterDrivers.Find("121gw")!;
         Assert.Equal(TimeSpan.FromMinutes(30), driver.AutoPowerOff!.DefaultTimeout);
-        if (!BleLinks.IsSupported)
-        {
-            Assert.Contains("#34", driver.Open(new MeterRequest(null, null, 1))!.Error);
-            Assert.Empty(driver.Discover());
-        }
+        Assert.Equal(OperatingSystem.IsWindows() || OperatingSystem.IsLinux(), BleLinks.IsSupported);
+        if (OperatingSystem.IsLinux()) Assert.Contains("bluetoothctl", driver.NotFoundHelp);
+        // Without Bluetooth (a CI machine, WSL), discovery finds nothing rather than failing.
+        _ = driver.Discover();
     }
 }
