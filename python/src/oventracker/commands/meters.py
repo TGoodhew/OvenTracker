@@ -43,7 +43,11 @@ def execute(s: MetersSettings) -> int:
         if d.not_ported:
             nothing.append(d)
             continue
-        candidates = d.discover()
+        if ui.live():  # the 121GW's scan takes a few seconds
+            with c.status(f"Looking for {ui.escape(d.name)} meters…", spinner="dots"):
+                candidates = d.discover()
+        else:
+            candidates = d.discover()
         if not candidates:
             nothing.append(d)
             continue

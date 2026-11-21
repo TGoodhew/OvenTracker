@@ -431,7 +431,9 @@ def _execute(s: RunSettings, token: CancellationToken) -> int:
             c.print(f"[red]No meter answered on {ui.escape(resource)}[/]: {ui.escape(found.error if found is not None and found.error else '')}")
         else:
             c.print(f"[red]No meter answered[/] (looking for a {ui.escape(driver.description)}).")
-        if driver.not_found_help:
+        # Not again when the error just shown already says it (a 121GW without bleak, say).
+        shown = found.error if resource is not None and found is not None and found.error else ""
+        if driver.not_found_help and driver.not_found_help not in shown:
             c.print(ui.escape(driver.not_found_help))
         c.print(
             f"[bold]{APP_NAME} meters[/] lists what each kind of meter can see. Give the meter's location with [bold]--resource[/] "

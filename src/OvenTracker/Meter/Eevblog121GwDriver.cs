@@ -17,7 +17,7 @@ public sealed class Eevblog121GwDriver : IMeterDriver
     public string Name => DriverName;
     public string Description => "EEVblog 121GW over Bluetooth LE";
 
-    public string ResourceHelp => "a paired Bluetooth LE meter, by address or name, e.g. ble:C4:BE:84:12:34:56 or ble:121GW (found by itself if left out)";
+    public string ResourceHelp => "a paired Bluetooth LE meter, by address or name, e.g. ble:C4:BE:84:12:34:56 or ble:121GW; found by itself if left out";
 
     public string NotFoundHelp =>
         OperatingSystem.IsWindows()
