@@ -80,10 +80,15 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
+      - name: Set up .NET (so the C# app can check the Python app's recordings and screens)
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
       - name: Install
         run: python -m pip install ./python[test]
 
-      - name: Test (every testdata case, against the expected files)
+      - name: Test (every testdata case, the engine and screens, and the C# app on Python's recordings)
         run: python -m pytest python/tests -q
 
   cross-check:

@@ -30,6 +30,7 @@ testdata/
 | `sim-characterise` | A characterise run: three setpoints, the adjustment changed, then the highest and lowest again. |
 | `synthetic-no-cycle` | Made by `tools/make_synthetic.py`: heats and then holds steady with no visible cycle, and ends with no end event. |
 | `synthetic-manual-finish` | `sim-bake-c` cut 60 % of the way through its first setpoint, finished by hand (`end:Manual`). |
+| `py-sim-bake-convection-f` | Recorded by the **Python** app's simulator, °F, bake and convection, so the C# app is checked on the Python app's recordings too. |
 
 The cases replay each run alone. Some also change options (`--precision`, `--tolerance`, `--probe`,
 `--favour`), and `combined` analyses two runs together.

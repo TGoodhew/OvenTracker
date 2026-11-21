@@ -144,6 +144,111 @@ def save_characterisation(info: SessionInfo, results: list[PointResult], folder:
     return ch
 
 
+def save_characterisation_rich(
+    info: SessionInfo, results: list[PointResult], folder: str, oven: OvenProfile, save: bool, oven_folder: str | None = None
+) -> Characterisation:
+    """RunCommand.SaveCharacterisation: writes characterisation.md and .json beside the run, shows them, and saves
+    the measured gains to the oven's profile: not for the generic profile (it stands for every oven), and not for
+    a simulation. ``oven_folder``: where oven profiles are saved (the usual folder when None)."""
+    from ..ui import console as ui
+    from ..ui.widgets import Rule, plain_print
+    from .names import APP_NAME
+
+    c = ui.get()
+    ch = Characterisation.from_results(info, results)
+    md = ch.markdown(info)
+    _write_text(os.path.join(folder, "characterisation.md"), md)
+    _write_text(os.path.join(folder, "characterisation.json"), dumps(ch))
+    c.print()
+    c.print(Rule("[orange1]Characterisation[/]"))
+    plain_print(c, md)
+    if not ch.measured_any:
+        c.print("[yellow]No gain could be measured: no setpoint was finished at both adjustments.[/]")
+    elif not save:
+        c.print("[grey]A simulation: the gains aren't saved to any oven's profile.[/]")
+    elif oven.is_generic:
+        c.print(
+            "[yellow]The gains aren't saved: the generic profile stands for every oven. Describe yours (docs/adding-an-oven.md), "
+            f'then save them with [bold]{APP_NAME} analyze "{ui.escape(folder)}" --oven <yours> --save-gains[/].[/]'
+        )
+    else:
+        import time
+
+        gains = dict(oven.gains or {})
+        for mode, g in ch.measured_gains(DateTimeOffset.from_timestamp_local(time.time())).items():
+            gains[mode] = g
+        path = ovens.save(replace(oven, gains=gains), oven_folder)
+        c.print(f"[green]Saved the measured gains to the {ui.escape(oven.name)}'s profile[/]: {ui.escape(path)}. Later runs use them.")
+    return ch
+
+
+def _rich_available() -> bool:
+    try:
+        import rich  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+def _execute_rich(s: AnalyzeSettings) -> int:
+    """As the C# app's analyze: the whole report on the console, then what was written."""
+    from ..ui import console as ui
+    from ..ui import console_report
+
+    c = ui.get()
+    error = s.validate()
+    if error is not None:
+        c.print(f"[red]Error:[/] {ui.escape(error)}")
+        return -1
+    runs: list[SavedRun] = []
+    for p in s.paths:
+        run = load(p)
+        if run is None:
+            c.print(f"[red]No readings.csv in {ui.escape(p)}.[/]")
+            return 1
+        runs.append(run)
+
+    unit = _latest(runs).info.unit
+    f = UnitFormatter(unit)
+
+    def options(info: SessionInfo) -> AnalysisOptions:
+        o = info.options
+        if s.precision is not None:
+            o = replace(o, precision_c=f.delta_from_display(s.precision))
+        if s.min_cycles is not None:
+            o = replace(o, min_cycles=s.min_cycles)
+        return o
+
+    info, results = combine(runs, options, s.adjustment_c(unit))
+    chosen = ovens.find(s.oven)
+    info = replace(
+        info,
+        options=options(info),
+        tolerance_c=f.delta_from_display(s.tolerance) if s.tolerance is not None else info.tolerance_c,
+        oven=chosen if chosen is not None else info.oven,
+        adjust=s.build_options(unit, info.adjust, chosen if chosen is not None else info.oven),
+        sensor=s.resolve_sensor(info.sensor, unit),
+    )
+    report = Report(info, results)
+    console_report.full(report)
+    folder = s.out if s.out is not None else _latest(runs).folder
+    os.makedirs(folder, exist_ok=True)
+    suffix = "reanalysed" if len(runs) == 1 else "combined"
+    output = os.path.join(folder, f"report-{suffix}.md")
+    _write_text(output, report.markdown())
+    json_path = os.path.join(folder, f"results-{suffix}.json")
+    _write_text(json_path, results_json(info, results))
+    c.print(f"\nWrote {ui.escape(output)} and {ui.escape(os.path.basename(json_path))}.")
+
+    if s.save_gains or (info.characterise is not None and info.characterise.changed_to_c is not None):
+        oven = info.oven if info.oven is not None else ovens.DEFAULT
+        if s.save_gains and oven.is_generic:
+            c.print("[red]--save-gains needs the oven: give --oven <key> (docs/adding-an-oven.md).[/]")
+            return 1
+        save_characterisation_rich(info, results, folder, oven, s.save_gains)
+    return 0
+
+
 def _summary(report: Report, out: TextIO) -> None:
     """A short summary for the console: each setpoint's result, and the recommendation."""
     info = report.info
@@ -160,6 +265,10 @@ def _summary(report: Report, out: TextIO) -> None:
 
 
 def execute(s: AnalyzeSettings, out: TextIO | None = None, err: TextIO | None = None) -> int:
+    """With Rich (a dependency of the whole app), the C# app's console output; without it (the analysis needs
+    only the standard library), a short summary."""
+    if out is None and err is None and _rich_available():
+        return _execute_rich(s)
     out = out if out is not None else sys.stdout
     err = err if err is not None else sys.stderr
     error = s.validate()

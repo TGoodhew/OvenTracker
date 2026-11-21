@@ -252,3 +252,14 @@ def unreadable(directory: str | None = None) -> list[str]:
 
 def to_json_text(profile: OvenProfile) -> str:
     return dumps(profile)
+
+
+def save(profile: OvenProfile, directory: str | None = None) -> str:
+    """Writes a profile to the oven folder (e.g. with gains measured by characterise), and returns the file
+    (OvenProfiles.Save)."""
+    d = directory if directory is not None else folder()
+    os.makedirs(d, exist_ok=True)
+    path = os.path.join(d, f"{profile.key}.json")
+    with open(path, "w", encoding="utf-8", newline="") as fh:
+        fh.write(dumps(profile))
+    return path
