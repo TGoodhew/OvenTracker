@@ -90,7 +90,7 @@ public sealed class Hp34401ADriver : IMeterDriver
     public static string? Check(string resource) => ResourceSpec.Parse(resource) switch
     {
         null => $"\"{resource}\" isn't an address the app understands (e.g. GPIB0::22::INSTR, COM3, or COM3:9600,E,7,2).",
-        { Transport: Transport.Usb or Transport.Lan } => "the 34401A connects by GPIB or RS-232, not USB or LAN.",
+        { Transport: Transport.Usb or Transport.Lan or Transport.Ble } => "the 34401A connects by GPIB or RS-232, not USB, LAN or Bluetooth.",
         { Visa: true } when !Visa.IsAvailable => Visa.MissingHelp,
         _ => null,
     };

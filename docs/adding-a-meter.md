@@ -1,7 +1,8 @@
 # Adding a meter
 
-OvenTracker reads its temperatures through a **driver**, one for each kind of meter. Three come with the
-app: the Keysight U1253B (`u1253b`), the HP 34401A with a PT100 (`34401a`) and the simulator (`simulated`). This page explains how to add another,
+OvenTracker reads its temperatures through a **driver**, one for each kind of meter. Four come with the
+app: the Keysight U1253B (`u1253b`), the HP 34401A with a PT100 (`34401a`), the EEVblog 121GW over Bluetooth
+LE (`121gw`) and the simulator (`simulated`). This page explains how to add another,
 for example a bench DMM with a thermocouple input, or a USB thermocouple logger.
 
 A meter needs two classes, both in `src/OvenTracker/Meter`:
@@ -165,6 +166,21 @@ driver chooses the link from the resource with `Hp34401ADriver.PortFor`.
 Don't search a GPIB bus by writing to every address: other instruments may not like it, and a bus extender
 makes every address look occupied. Try `request.Resource` or `request.Preferred`. List the bus in `Discover`,
 so `oventracker meters --probe` asks each instrument only when someone asks for that.
+
+### Bluetooth LE
+
+`Meter/Ble/` has an `IBleLink`: a subscription to one GATT characteristic, whose notifications arrive through
+a callback.
+
+- **Windows:** `WindowsGattLink` uses the Win32 Bluetooth GATT API, which works with paired devices, and
+  keeps the app on plain .NET, which the WinRT API wouldn't allow. `BleLinks.List()` lists the paired devices.
+- **Linux:** not yet (issue #34). `BleLinks.IsSupported` says so, and a driver should return
+  `BleLinks.NotSupportedHelp` as its error.
+
+A streaming meter (one that sends without being asked) keeps the latest packet. Its `Read` waits for a newer
+one, so the app's polling never records the same packet twice. `Eevblog121GwMeter` is the example, and its
+tests drive it with a fake link. Put packets back together across notifications (`Gw121Assembler`): a
+notification can hold part of a packet, or parts of two.
 
 ## Driver settings: `--meter-option`
 

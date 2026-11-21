@@ -261,12 +261,13 @@ adjustment](docs/oven-control-model.md) explains the method.
 
 ## Other meters
 
-Each kind of meter has a driver in `src/OvenTracker/Meter`. Three come with the app:
+Each kind of meter has a driver in `src/OvenTracker/Meter`. Four come with the app:
 
 | `--meter` | What it is | `--resource` |
 | --- | --- | --- |
 | `u1253b` (the default) | A Keysight U1253B (or another U1250-series meter) through a U1177A Bluetooth adapter or a U1173 cable | A serial port: `COM5` on Windows, `/dev/rfcomm0` on Linux (9600 8N1, or give settings: `COM5:9600,N,8,1`). Left out, the app tries the port that worked last time, then each Bluetooth link. |
 | `34401a` | An HP / Agilent / Keysight 34401A bench DMM reading a PT100 RTD by 4-wire resistance (see below) | `GPIB0::22::INSTR` (or `gpib:22`) through VISA, or a serial port for its RS-232 port: `COM3`, `/dev/ttyUSB0` (9600, even parity, 7 data bits, 2 stop bits from the factory, or give settings: `COM3:9600,N,8,2`). Required the first time, then remembered. |
+| `121gw` | An EEVblog 121GW with a type K thermocouple, over Bluetooth LE (Windows only, for now) | `ble:C4:BE:84:12:34:56` or `ble:121GW`. Left out, the app tries the one that answered last time, then each paired 121GW. |
 | `simulated` | A made-up oven and meter. `--simulate` is short for `--meter simulated`. | Not used. |
 
 Without `--meter` the app uses the meter that answered last time, or the U1253B. `oventracker meters` lists what
@@ -318,13 +319,42 @@ OvenTracker.exe run --meter 34401a --resource COM3 --meter-option rtd=pt100-b
 - **A bench meter:** it's mains powered, so there's no battery and no auto power-off. It beeps when a setpoint
   is done.
 
+### The EEVblog 121GW
+
+The 121GW streams its display over Bluetooth LE, about twice a second. The app takes its temperature mode,
+in °C or °F as the meter shows it, with a type K thermocouple.
+
+```powershell
+OvenTracker.exe meters --meter 121gw          # the paired Bluetooth LE devices; a 121GW is marked
+OvenTracker.exe run --meter 121gw             # finds the paired 121GW by itself
+```
+
+- **Pair it first** in Windows Bluetooth settings (Add device, Bluetooth, then 121GW), with Bluetooth on at
+  the meter (BT shows on its display). The app uses Windows' Bluetooth LE (GATT) API, which works with paired
+  devices.
+- **Linux** isn't supported yet: the app says so. Adding it through BlueZ is
+  [issue #34](https://github.com/TGoodhew/OvenTracker/issues/34).
+- **Only plain temperature counts:** with HOLD, REL or MIN/MAX on, the display isn't the live temperature, so
+  the app waits as it does for the wrong dial position.
+- **The unit flags:** firmware 1.21 and later tell the app whether the meter shows °C or °F. An older meter is
+  taken as °C.
+- **Auto power-off:** 30 minutes from the factory. The meter reports whether it's armed, so the app warns only
+  when it is. Turn it off in the meter's setup (APO.oF).
+- **Battery:** the meter reports only a low-battery flag, not a level, so the reset screen shows no battery
+  percentage for it.
+
+The protocol comes from EEVblog's packet format (V2) as written up by the dmm-tools project, and from QtDMM's
+decoder. Both agree with packets captured from real meters. The driver hasn't been tried on a 121GW yet.
+Report what you find.
+
 To add a meter, for example a bench DMM with a thermocouple input, implement `ITemperatureMeter` and
 `IMeterDriver` and list the driver in `MeterDrivers.All`. Only four members are required; the rest (the
 sensor, battery, beep, and the meter's auto power-off setting) are optional. A driver can also declare that
 its meter switches itself off, with the steps to turn that off, and the app then warns before a run.
 [Adding a meter](docs/adding-a-meter.md) explains every member, with a sketch of a SCPI bench-meter driver.
 `U1253BDriver` (serial and Bluetooth), `Hp34401ADriver` (GPIB through VISA, RS-232, and its own
-`--meter-option` settings) and `SimulatedDriver` are the worked examples.
+`--meter-option` settings), `Eevblog121GwDriver` (Bluetooth LE, a streamed protocol) and `SimulatedDriver`
+are the worked examples.
 
 ## Protocol notes (U1253B)
 
@@ -334,6 +364,21 @@ an open thermocouple), `SYST:BATT?` and `SYST:BEEP`. It ignores the meter's own 
 when the dial moves, `*L` for a button). It re-checks `CONF?` every few readings, so turning the dial
 away from temperature is noticed and those readings aren't used. If the Bluetooth link drops, the app
 reconnects and carries on.
+
+## Protocol notes (121GW)
+
+The meter streams 19-byte packets on the GATT characteristic `e7add780-b042-4876-aae1-112855353cc1` of the
+service `0bd51666-e7cb-469b-8e4d-2742f1ba77cc`. The app subscribes with indications, or notifications if the
+characteristic offers only those. It sends nothing to the meter.
+
+Each packet is F2, then 17 bytes of display data, then an XOR checksum, so all 19 bytes XOR to zero. Byte 5
+holds the main mode (5 is temperature) and the two high bits of the value. Byte 6 holds overload, sign, °C,
+°F and the range. Bytes 7–8 hold the rest of the value, big-endian. Byte 15 holds the APO and low-battery
+icons; bytes 16–17 hold REL, MIN/MAX and HOLD.
+
+Packets aren't aligned to notifications, so the app treats them as one stream. It takes 19 bytes from each F2
+and keeps them only if the checksum and the mode and range are valid. Each `Read` returns a packet newer than
+the last, so a slow stream never gives the same reading twice.
 
 ## Protocol notes (34401A)
 

@@ -18,6 +18,9 @@ public enum Transport
 
     /// <summary>LAN (VXI-11 or HiSLIP), through VISA.</summary>
     Lan,
+
+    /// <summary>Bluetooth LE (GATT), e.g. the EEVblog 121GW: <c>ble:C4:BE:84:12:34:56</c>, or <c>ble:121GW</c> by name.</summary>
+    Ble,
 }
 
 /// <summary>A serial port's settings: they must match the meter's (often set on its front panel).</summary>
@@ -46,6 +49,7 @@ public sealed record SerialSettings(int Baud = 9600, Parity Parity = Parity.None
 /// <item><c>GPIB0::22::INSTR</c> (or <c>GPIB::22</c>, <c>gpib:22</c>): GPIB address 22, through VISA.</item>
 /// <item><c>ASRL3::INSTR</c>: serial port 3, through VISA.</item>
 /// <item><c>USB0::…::INSTR</c>, <c>TCPIP0::…::INSTR</c>: USB-TMC and LAN instruments, through VISA.</item>
+/// <item><c>ble:C4:BE:84:12:34:56</c>, <c>ble:121GW</c>: a Bluetooth LE device, by address or by name.</item>
 /// </list>
 /// </summary>
 /// <param name="Address">For a serial port, its name (COM3, /dev/ttyUSB0); for VISA, the full resource string.</param>
@@ -73,6 +77,11 @@ public sealed partial record ResourceSpec(Transport Transport, string Address, S
             if (addr > 30) return null;
             var sec = g.Groups["sec"].Success ? $"::{g.Groups["sec"].Value}" : "";
             return new ResourceSpec(Transport.Gpib, $"GPIB{board}::{addr}{sec}::INSTR", Visa: true);
+        }
+        if (s.StartsWith("ble:", StringComparison.OrdinalIgnoreCase))
+        {
+            var what = s[4..].Trim();
+            return what.Length == 0 ? null : new ResourceSpec(Transport.Ble, what);
         }
         var upper = s.ToUpperInvariant();
         if (upper.StartsWith("ASRL", StringComparison.Ordinal)) return new ResourceSpec(Transport.Serial, s, Visa: true);
@@ -118,6 +127,7 @@ public sealed partial record ResourceSpec(Transport Transport, string Address, S
         Transport.Gpib => "GPIB",
         Transport.Usb => "USB",
         Transport.Lan => "LAN",
+        Transport.Ble => "Bluetooth LE",
         _ => "Serial",
     };
 }
