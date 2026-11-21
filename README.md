@@ -74,14 +74,29 @@ results](docs/best-results.md) explains each step.
     ports. The app uses the **outgoing** one (the one with the adapter's address) and finds it by itself.
   - **Linux:** pair it and bind it to `/dev/rfcomm0` (see [Linux](#linux)). The app finds RFCOMM devices by
     itself.
-- OvenTracker from the [Releases](https://github.com/TGoodhew/OvenTracker/releases) page. The
-  *self-contained* packages need nothing else; the others need the
-  [.NET 11 runtime](https://dotnet.microsoft.com/download).
+- OvenTracker from the [Releases](https://github.com/TGoodhew/OvenTracker/releases) page:
+  - **Windows:** the installer, `OvenTracker-<version>-win-x64-setup.exe`. It installs for you alone (no
+    administrator rights), adds a Start menu entry, and can put `OvenTracker` on your PATH. If the
+    [.NET 11 runtime](https://dotnet.microsoft.com/download) is missing, it offers to install it (that step
+    asks Windows for permission).
+  - **Ubuntu, Debian or Raspberry Pi OS:** the `.deb`; see [Linux](#linux).
+  - **Without installing:** the zips and tarballs. The *self-contained* ones need nothing else; the others
+    need the .NET 11 runtime.
 
 ## Linux
 
 OvenTracker runs on Linux on x64 and 64-bit ARM (a Raspberry Pi 4 or 5 makes a handy oven-side logger).
-Unpack the package and run it from a terminal:
+On Ubuntu, Debian or Raspberry Pi OS, install the `.deb` from the Releases page (`arm64` on a Pi) and run
+`oventracker` from a terminal:
+
+```sh
+sudo apt install ./oventracker_1.0.0_amd64.deb    # needs no .NET packages: everything is included
+oventracker --help
+```
+
+The Python version has its own `.deb`, which uses Ubuntu's Python packages:
+`sudo apt install ./oventracker-py_1.0.0_all.deb`, then `oventracker-py`. Both can be installed together.
+On other distributions, unpack a tarball instead:
 
 ```sh
 mkdir ~/oventracker && tar -xzf OvenTracker-*-linux-x64-self-contained.tar.gz -C ~/oventracker
@@ -532,9 +547,12 @@ One codebase builds for every system. `build.ps1` needs PowerShell 7 and runs on
 
 ```powershell
 ./build.ps1 -SignScript C:\path\to\Sign-Files.ps1         # Windows: test, publish, sign, zip
+./packaging/build-installer.ps1 -SignScript C:\path\to\Sign-Files.ps1   # then the signed installer (Inno Setup 6)
 ./build.ps1 -SelfContained                                # this system, with the .NET runtime included
 ./build.ps1 -Runtime linux-x64,linux-arm64 -SkipTests     # Linux packages (build them on Linux)
 ```
+
+`packaging/build-deb.sh` makes the `.deb`s on Linux; [docs/releasing.md](docs/releasing.md) has the steps.
 
 `build.ps1` runs the tests, then publishes each runtime (by default the one you're on) into
 `artifacts/publish/<runtime>`. It packs Windows into `artifacts/OvenTracker-<version>-win-x64.zip`, and
@@ -553,7 +571,10 @@ request. On Linux it also publishes the app and runs a whole simulated session i
 Python package on both systems, and checks that the C# and Python analyses agree on every case in
 `testdata/`.
 **Releases** ([release.yml](.github/workflows/release.yml)) build each package on its own system (Windows,
-Linux x64 and Linux ARM64), sign the Windows programs, build the Python package, and publish them all with a `SHA256SUMS` file.
+Linux x64 and Linux ARM64). They sign the Windows programs and the installer, and install and run every
+package on a fresh runner. Then they publish them all with a `SHA256SUMS` file and build-provenance
+attestations, with the notes taken from `CHANGELOG.md`. A dry run builds and tries everything without
+publishing.
 [docs/releasing.md](docs/releasing.md) explains how to make a release and how signing is set up.
 
 ## License

@@ -1,19 +1,25 @@
 name: Release
 
-# Builds every package on its own system and publishes them, with a SHA256SUMS file, as one GitHub Release:
+# Builds every package on its own system and publishes them, with a SHA256SUMS file and build-provenance
+# attestations, as one GitHub Release:
+#   OvenTracker-<version>-win-x64-setup.exe              Windows installer: per user, fetches the .NET 11
+#                                                        runtime if it's missing (signed, as is its uninstaller)
 #   OvenTracker-<version>-win-x64.zip                    Windows, needs the .NET 11 runtime (signed)
 #   OvenTracker-<version>-win-x64-self-contained.zip     Windows, everything included (signed)
-#   OvenTracker-<version>-linux-x64.tar.gz               Linux x64, needs the .NET 11 runtime
-#   OvenTracker-<version>-linux-x64-self-contained.tar.gz
-#   OvenTracker-<version>-linux-arm64.tar.gz             Linux on 64-bit ARM, e.g. a Raspberry Pi 4 or 5
-#   OvenTracker-<version>-linux-arm64-self-contained.tar.gz
+#   oventracker_<version>_amd64.deb, _arm64.deb          Ubuntu, Debian, Raspberry Pi OS: the .NET app
+#   oventracker-py_<version>_all.deb                     Ubuntu, Debian: the Python version
+#   OvenTracker-<version>-linux-x64[-self-contained].tar.gz, -linux-arm64[-self-contained].tar.gz
+#                                                        Linux, other distributions
 #   oventracker-<version>-py3-none-any.whl, oventracker-<version>.tar.gz
-#                                                        The Python package (the analysis), also published to
-#                                                        PyPI when the repository variable PYPI_PUBLISH is true
+#                                                        The Python version, for pipx; also published to PyPI
+#                                                        when the repository variable PYPI_PUBLISH is true
 #
 # The Windows programs are signed with Azure Artifact Signing, and a release is never made with unsigned ones:
-# the Windows job fails, and nothing is published, until the 'release' environment is set up as
-# docs/releasing.md describes.
+# the Windows job fails, and nothing is published, unless the 'release' environment is set up as
+# docs/releasing.md describes. Each package is installed and run on a fresh runner before anything is published.
+#
+# A dry run (Actions, Release, Run workflow, with "Dry run" ticked) builds, signs and tries everything, and
+# leaves the packages as the run's artifacts, but tags and publishes nothing.
 
 on:
   push:
@@ -22,9 +28,14 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to build and publish, e.g. 1.2.0 (no leading v). Tags the commit v<version>.'
+        description: 'Version to build, e.g. 1.2.0 (no leading v). Unless a dry run, tags the commit v<version> and publishes it.'
         required: true
         type: string
+      dry_run:
+        description: 'Dry run: build, sign and try everything, but publish nothing'
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -72,20 +83,31 @@ jobs:
         run: |
           $v = '${{ needs.version.outputs.version }}'
           ./build.ps1 -Runtime ${{ matrix.rid }} -Version $v
-          ./build.ps1 -Runtime ${{ matrix.rid }} -Version $v -SelfContained -SkipTests
           & ./artifacts/publish/${{ matrix.rid }}/OvenTracker --version
           if ($LASTEXITCODE -ne 0) { throw "The packaged program didn't run ($LASTEXITCODE)." }
+          ./build.ps1 -Runtime ${{ matrix.rid }} -Version $v -SelfContained -SkipTests
+      - name: Build the .deb (from the self-contained build)
+        run: bash packaging/build-deb.sh dotnet '${{ needs.version.outputs.version }}' ${{ matrix.rid }} artifacts/publish/${{ matrix.rid }}
+      - name: Install, run and remove the .deb
+        run: |
+          sudo apt-get install -y ./artifacts/oventracker_*.deb
+          test "$(oventracker --version)" = '${{ needs.version.outputs.version }}'
+          test -f /usr/share/applications/oventracker.desktop
+          sudo apt-get remove -y oventracker
+          ! command -v oventracker
       - uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.rid }}
-          path: artifacts/*.tar.gz
+          path: |
+            artifacts/*.tar.gz
+            artifacts/*.deb
           if-no-files-found: error
 
   windows:
     name: Windows (win-x64, signed)
     needs: version
-    # The protected 'release' environment holds the signing identity's IDs (variables, not secrets), and can
-    # require a reviewer's approval before this job runs.
+    # The protected 'release' environment holds the signing identity's IDs (variables, not secrets), and
+    # requires a reviewer's approval before this job runs.
     environment: release
     runs-on: windows-latest
     permissions:
@@ -102,6 +124,10 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
       - name: Sign in to Azure for signing (OIDC)
         uses: azure/login@v2
         with:
@@ -117,12 +143,37 @@ jobs:
         run: |
           $v = '${{ needs.version.outputs.version }}'
           $sign = './packaging/Sign-ArtifactSigning.ps1'
-          ./build.ps1 -Runtime win-x64 -Version $v -SignScript $sign
-          ./build.ps1 -Runtime win-x64 -Version $v -SelfContained -SkipTests -SignScript $sign
+          # The self-contained build first: the installer takes the framework-dependent one, published last.
+          ./build.ps1 -Runtime win-x64 -Version $v -SelfContained -SignScript $sign
+          ./build.ps1 -Runtime win-x64 -Version $v -SkipTests -SignScript $sign
+          ./packaging/build-installer.ps1 -Version $v -SignScript $sign
+      - name: Install, run and uninstall
+        shell: pwsh
+        run: |
+          $v = '${{ needs.version.outputs.version }}'
+          $setup = "artifacts/OvenTracker-$v-win-x64-setup.exe"
+          $p = Start-Process $setup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/TASKS=addtopath', '/LOG=install.log' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Get-Content install.log; throw "The installer failed ($($p.ExitCode))." }
+          $dir = Join-Path $env:LOCALAPPDATA 'Programs\OvenTracker'
+          foreach ($file in 'OvenTracker.exe', 'OvenTracker.dll', 'unins000.exe') {
+            $s = Get-AuthenticodeSignature (Join-Path $dir $file)
+            if ($s.Status -ne 'Valid') { throw "$file installed without a valid signature: $($s.Status)" }
+          }
+          $out = & (Join-Path $dir 'OvenTracker.exe') --version
+          if ($LASTEXITCODE -ne 0 -or "$out".Trim() -ne $v) { throw "The installed program said '$out' ($LASTEXITCODE)." }
+          if ([Environment]::GetEnvironmentVariable('Path', 'User') -notlike "*$dir*") { throw 'The installer didn''t add OvenTracker to the PATH.' }
+          Start-Process (Join-Path $dir 'unins000.exe') -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait
+          # The uninstaller hands over to a copy of itself, so wait for the files to go.
+          for ($i = 0; $i -lt 60 -and (Test-Path (Join-Path $dir 'OvenTracker.exe')); $i++) { Start-Sleep 1 }
+          if (Test-Path (Join-Path $dir 'OvenTracker.exe')) { throw 'The uninstaller left OvenTracker.exe behind.' }
+          if ([Environment]::GetEnvironmentVariable('Path', 'User') -like "*$dir*") { throw 'The uninstaller left OvenTracker on the PATH.' }
+          Write-Host 'Installed, signed, ran, and uninstalled cleanly.'
       - uses: actions/upload-artifact@v4
         with:
           name: release-win-x64
-          path: artifacts/*.zip
+          path: |
+            artifacts/*.zip
+            artifacts/*-setup.exe
           if-no-files-found: error
       - name: Sign out of Azure
         if: always()
@@ -130,7 +181,7 @@ jobs:
         run: az logout; az account clear
 
   python:
-    name: Python package
+    name: Python version
     needs: version
     runs-on: ubuntu-latest
     steps:
@@ -148,19 +199,40 @@ jobs:
           python -m pip install build "./python[test]"
           python -m pytest python/tests -q
           python -m build python --outdir dist-python
+      - name: Build the .deb
+        run: bash packaging/build-deb.sh python '${{ needs.version.outputs.version }}' dist-python/oventracker-${{ needs.version.outputs.version }}-py3-none-any.whl
+      - name: Install, run and remove the .deb (with Ubuntu's own Python packages)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ./artifacts/oventracker-py_*_all.deb
+          test "$(/usr/bin/oventracker-py --version)" = '${{ needs.version.outputs.version }}'
+          sudo apt-get remove -y oventracker-py
+          ! test -e /usr/bin/oventracker-py
       - uses: actions/upload-artifact@v4
         with:
-          name: release-python
+          name: release-python # the wheel and sdist: what goes to PyPI
           path: dist-python/*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-python-deb
+          path: artifacts/*.deb
           if-no-files-found: error
 
   publish:
     name: Publish the release
     needs: [version, linux, windows, python]
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
     runs-on: ubuntu-latest
     permissions:
       contents: write # gh release create, with the workflow's own token
+      id-token: write # the attestations' signing identity
+      attestations: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: CHANGELOG.md
+          sparse-checkout-cone-mode: false
       - uses: actions/download-artifact@v4
         with:
           pattern: release-*
@@ -169,14 +241,29 @@ jobs:
       - name: Checksums
         working-directory: dist
         run: sha256sum * | tee SHA256SUMS
+      - name: Attest where each file was built
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*
+      - name: Release notes, from the changelog
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          # The version's section of CHANGELOG.md: from its "## <version>" heading to the next "## ".
+          awk -v v="$VERSION" '
+            /^## / { if (found) exit; if ($2 == v) { found = 1; next } }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          if [ -s notes.md ]; then cat notes.md; else echo "::warning::CHANGELOG.md has no section for $VERSION"; fi
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.version.outputs.version }}
         run: |
+          if [ -s notes.md ]; then notes=(--notes-file notes.md); else notes=(--generate-notes); fi
           gh release create "v$VERSION" dist/* \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-            --title "OvenTracker $VERSION" --generate-notes
+            --title "OvenTracker $VERSION" "${notes[@]}"
 
   pypi:
     name: Publish to PyPI

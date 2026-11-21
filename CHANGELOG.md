@@ -1,10 +1,24 @@
 # Changelog
 
-Both implementations share one version number: the C# app (`src/`) and the Python package (`python/`, the
-analysis only for now). Each entry says which implementations have the change: **both**, **C#** (the Python
-port doesn't cover it, or a `parity` issue is open), or **Python**.
+Both implementations share one version number: the C# app (`src/`) and the Python version (`python/`). Each
+entry says which implementations have the change: **both**, **C#** (the Python port doesn't cover it, or a
+`parity` issue is open), or **Python**.
 
 ## Unreleased
+
+## 1.0.0 (2026-11-21)
+
+The first release.
+
+- Release packages (#56).
+  - **Windows:** a signed installer. It installs per user, adds a Start menu entry and optionally the PATH,
+    and offers to install the .NET 11 runtime if it's missing.
+  - **Linux:** `.deb` packages for Ubuntu, Debian and Raspberry Pi OS: the .NET app (amd64, arm64,
+    self-contained) and the Python version (using Ubuntu's Python packages).
+  - **The icon:** a new one for the app, the installer and the Linux menu entries.
+  - **Checks:** each package is installed and run on a fresh runner before it's published, with checksums
+    and build-provenance attestations.
+  - **Fixed:** `build.ps1 -Version` no longer fails: the version argument was passed one character at a time.
 
 - The UNI-T UT60BT, over Bluetooth LE: `--meter ut60bt` (#54). Has: **both**.
   - **How it reads:** in its temperature mode (°C or °F) with a type K thermocouple. The app asks the meter for
@@ -83,8 +97,6 @@ port doesn't cover it, or a `parity` issue is open), or **Python**.
 - Choose the connection type with `--resource` (serial settings, GPIB, VISA). Has: **C#**.
 - `characterise`, oven profiles, and the best adjustment from measured gains. Has: **C#** (the analysis of a
   characterise run's readings: **both**).
-
-## 1.0.0
 
 - The first version: the U1253B through a U1177A, bake and convection, the live display, the report and the
   recommended adjustment. Has: **C#**.

@@ -1,5 +1,5 @@
-"""OvenTracker's analysis in Python: re-analyse a recorded oven run and write the same report and results as
-the C# app (the reference implementation; see spec/ in the repository)."""
+"""OvenTracker in Python: the whole app, with the same commands, screens, report and results as the C# app (the
+reference implementation; see spec/ in the repository)."""
 
 from __future__ import annotations
 

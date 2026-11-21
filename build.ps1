@@ -41,7 +41,8 @@ $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 $artifacts = Join-Path $root 'artifacts'
 $project = Join-Path $root 'src' 'OvenTracker' 'OvenTracker.csproj'
-$versionArgs = if ($Version) { @("-p:Version=$Version") } else { @() }
+# Always an array: an if expression returns one string bare, and splatting a string passes its characters.
+$versionArgs = @(if ($Version) { "-p:Version=$Version" })
 
 function Write-Step([string] $text) { Write-Host "==> $text" -ForegroundColor Cyan }
 
