@@ -70,6 +70,12 @@ public interface ITemperatureMeter : IDisposable
     double? ReadBatteryPercent() => null;
 
     /// <summary>
+    /// Whether the meter says its battery is low, for a meter that has a low-battery flag rather than a level (the
+    /// 121GW). Null if it can't say; then the level from <see cref="ReadBatteryPercent"/> decides.
+    /// </summary>
+    bool? ReadLowBattery() => null;
+
+    /// <summary>
     /// What the meter's auto power-off is set to, if it can say. Unknown by default; the driver's
     /// <see cref="IMeterDriver.AutoPowerOff"/> says whether the meter has one at all.
     /// </summary>
@@ -92,6 +98,12 @@ public interface IOvenSimulation
 
     /// <summary>Gives the simulated meter an auto power-off (--sim-apo), or none.</summary>
     void SetAutoPowerOff(TimeSpan? after);
+
+    /// <summary>Makes the simulated meter's battery run down over this long (--sim-battery), its readings going wrong as it does.</summary>
+    void SetBattery(TimeSpan? lastsFor);
+
+    /// <summary>"Swaps" the simulated meter's battery: it's off for a couple of minutes, then back with a full one.</summary>
+    void SwapBattery();
 }
 
 public sealed class MeterException(string message, Exception? inner = null) : Exception(message, inner);

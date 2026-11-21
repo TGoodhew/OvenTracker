@@ -107,6 +107,8 @@ Setpoint events (`point` ≥ 1):
 | `heading` | After `not-heading`, the oven is heading for the setting after all. `time_utc` and `elapsed_s` are the reading's. | Nothing. |
 | `meter-silent` | The meter has gone quiet (often its auto power-off). | Nothing. |
 | `meter-back` | The meter is answering again. | Nothing. |
+| `pause:LowBattery`, `pause:ImpossibleReading` | Tracking paused: the meter's battery is low (or B was pressed for a swap), or a reading changed faster than an oven can (10 °C a second). Until `pause-end`, the readings are written as point-0 rows, outside the setpoint. | Nothing; the point-0 rows leave a gap in the setpoint's readings, which the analysis handles ([Gaps](analysis.md#gaps)). |
+| `pause-end` | Tracking carries on with the same setpoint (the meter came back with a good battery, or Enter or C was pressed). | Nothing. |
 | `end:<reason>` | When the setpoint finishes, for any reason. `<reason>` is a completion reason: `Converged`, `TimedOut`, `Manual`, `Skipped` or `Aborted` (`None` is possible in principle). | If a setpoint is open: `end:Converged` and `end:TimedOut` finish it as `Manual` if the replayed analysis hasn't completed by itself; the others finish it with that reason, unless it has already completed. Then the result is added. See [analysis.md, Replay](analysis.md#replay). |
 
 A setpoint whose run was killed (no `end:`) is closed as `Aborted` by the next `start`, or at the end of the

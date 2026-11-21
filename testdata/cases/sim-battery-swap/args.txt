@@ -1,0 +1,2 @@
+# the simulated meter's battery ran low; the app paused for a swap and carried on with the same setpoint (#51)
+runs/sim-battery-swap

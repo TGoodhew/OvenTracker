@@ -125,6 +125,11 @@ class Eevblog121GwMeter(TemperatureMeter):
         with self._gate:
             return self._latest is not None and self._latest.low_battery
 
+    def read_low_battery(self) -> bool | None:
+        """The low-battery icon from the latest packet; None before the first one."""
+        with self._gate:
+            return None if self._latest is None else self._latest.low_battery
+
     def dispose(self) -> None:
         self.disconnect()
 
@@ -185,6 +190,7 @@ class Eevblog121GwDriver(MeterDriver):
     itself, by scanning for a few seconds."""
 
     name = DRIVER_NAME
+    has_battery = True
     description = "EEVblog 121GW over Bluetooth LE"
     resource_help = "a Bluetooth LE meter, by address or name, e.g. ble:C4:BE:84:12:34:56 or ble:121GW; found by itself if left out"
 

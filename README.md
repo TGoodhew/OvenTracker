@@ -139,14 +139,37 @@ By default the modes alternate at each setpoint (bake 350, convection 350, bake 
 then only ever heats up between setpoints, and bake and convection are compared under the same
 conditions. `--grouped` does all of bake first.
 
-Keys while tracking: **P** preheat signal · **N N** finish this setpoint now · **R R** restart it (if
-the door was opened) · **S S** skip · **Z** chart view · **Q Q** quit and write the report.
+Keys while tracking: **P** preheat signal · **B** battery swap · **N N** finish this setpoint now · **R R**
+restart it (if the door was opened) · **S S** skip · **Z** chart view · **Q Q** quit and write the report.
 Ctrl+C also stops cleanly and writes the report.
 
 If the meter stops answering for 30 s (most often its auto power-off), the live display says so in red,
 with how to wake it ("press any button on the meter, or turn the dial"), and the PC beeps. Tracking
 carries on as soon as readings come back. The gap is recorded in `readings.csv`, and the report notes any
-setpoint with a gap of a minute or more.
+setpoint with a gap of a minute or more. A gap of more than two minutes breaks the thermostat cycle it falls
+in: that cycle is left out, and the others are kept.
+
+### Battery swaps
+
+A meter running on a battery (the U1253B, the 121GW) gives false readings once its battery is low. The
+U1253B's guide says to change it as soon as the low-battery sign shows. A characterise session can outlast a
+battery, so the app watches for it:
+- **When the battery runs low** (below 20 %, checked every minute), or a reading jumps faster than an oven can
+  change (10 °C or 18 °F in a second, as a failing meter's do), the app **pauses the setpoint**. It beeps and
+  says what to do.
+- **Swap or charge the battery:** switch the meter off, fit a fresh battery (or a charged one), and switch it
+  back on at temperature.
+- **Tracking carries on by itself** once the meter has been off and is back with sensible readings, or when you
+  press **Enter**. It's the **same setpoint**, with its cycles so far kept, so there's no reheat or fresh start:
+  only the cycle the swap broke is left out.
+- **B** pauses for a swap whenever you choose, before the battery gets low. While paused, **C** carries on
+  without a swap.
+- While paused, readings are recorded in `readings.csv` outside the setpoint, so re-analysing gives exactly what
+  the live run did.
+
+Before a run, the app mentions a battery below 60 %: a long session will probably need a swap. The 34401A runs
+off the mains, so none of this applies to it. A reading that jumps impossibly still pauses it, with advice to
+check the probe.
 
 ### Logging a run
 

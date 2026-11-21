@@ -62,6 +62,9 @@ class MeterDriver:
     description: str = ""
     resource_help: str = ""
     is_simulation: bool = False
+    #: Whether this kind of meter runs on a battery. When it runs low mid-setpoint, the app pauses for a battery swap
+    #: and carries on with the same setpoint. False (the default) for a mains-powered bench meter.
+    has_battery: bool = False
     #: Not in the Python version yet: the C# app has it.
     not_ported: bool = False
 

@@ -157,6 +157,7 @@ def _is_u1250(identity: MeterIdentity) -> bool:
 
 class U1253BDriver(MeterDriver):
     name = DRIVER_NAME
+    has_battery = True
     description = "Keysight U1253B through a U1177A Bluetooth adapter (or a U1173 cable)"
 
     @property

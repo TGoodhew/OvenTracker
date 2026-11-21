@@ -6,6 +6,15 @@ port doesn't cover it, or a `parity` issue is open), or **Python**.
 
 ## Unreleased
 
+- Battery swaps without starting the setpoint again (#51). Has: **both**.
+  - **What pauses it:** a battery meter running low (checked every minute), a reading jumping faster than an
+    oven can change, or **B**.
+  - **What happens:** the app tells you to swap the battery, then carries on with the same setpoint, its cycles
+    so far kept.
+  - **Gaps:** in the analysis, a gap of more than two minutes in the readings breaks the cycle it falls in. That
+    cycle is left out, rather than joined across the gap. So the real 20 November run now has one clean cycle;
+    its second "cycle" crossed a 16-minute gap.
+
 - An oven that heats in steps (its elements taking turns, with dips) no longer has a step taken for reaching the
   setting and the rest for thermostat cycles: a turn short of the setting is withdrawn if the oven goes on well
   past it (#49). Found on a GE PHS925. Has: **both**.

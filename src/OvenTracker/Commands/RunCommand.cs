@@ -105,6 +105,10 @@ public class RunSettings : SharedSettings
     [Description("With --simulate, give the simulated meter an auto power-off after this many minutes (it wakes 2 minutes later).")]
     public double? SimApo { get; set; }
 
+    [CommandOption("--sim-battery <MINUTES>", IsHidden = true)]
+    [Description("With --simulate, make the simulated meter's battery run down over this many minutes, its readings going wrong near the end; the app pauses for a swap.")]
+    public double? SimBattery { get; set; }
+
     [CommandOption("-y|--yes")]
     [Description("Don't ask: start at once and begin each setpoint straight away (mainly for --simulate).")]
     public bool Yes { get; set; }
@@ -240,6 +244,7 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
             appSettings.Save();
             AnsiConsole.MarkupLine($"[green]Connected[/] to {Markup.Escape(identity.ToString())} on {Markup.Escape(found.Resource)}.");
             foreach (var note in found.Notes ?? []) AnsiConsole.MarkupLine($"[yellow]{Markup.Escape(note)}[/]");
+            if (driver.HasBattery && BatteryNote(meter.ReadBatteryPercent()) is { } batteryNote) AnsiConsole.MarkupLine($"[yellow]{Markup.Escape(batteryNote)}[/]");
 
             config = meter.ReadConfig();
             if (config is { IsTemperature: false })
@@ -260,6 +265,7 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
         }
         var oven = meter as IOvenSimulation;
         if (s.SimApo is { } simApo) oven?.SetAutoPowerOff(TimeSpan.FromMinutes(simApo));
+        if (s.SimBattery is { } simBattery) oven?.SetBattery(TimeSpan.FromMinutes(simBattery));
         // Prompts need a terminal; without one (output to a file or pipe), the run goes on as with --yes.
         var interactive = ConsoleCaps.Live;
         if (!interactive && MissingWithoutTerminal(s) is { } missing)
@@ -465,7 +471,7 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
 
         var results = new List<PointResult>(earlier);
         var meterLabel = driver.IsSimulation ? "simulated meter" : $"{identity.Model} on {meter.Location}";
-        var tracker = new PointTracker(poller, recorder, f, options, toleranceC, meterLabel, driver.NotTemperatureHelp, plan.Count, driver.IsSimulation, driver.AutoPowerOff, sensor?.MaxC);
+        var tracker = new PointTracker(poller, recorder, f, options, toleranceC, meterLabel, driver.NotTemperatureHelp, plan.Count, driver.IsSimulation, driver.AutoPowerOff, sensor?.MaxC, driver.HasBattery);
         var waiter = new ResetWaiter(poller, recorder, f, ambientC ?? AssumedAmbientC, ambientC is null, driver.IsSimulation, driver.AutoPowerOff);
         var afterReset = resumed is not null; // the first setpoint of a resumed run follows a break
         var stopped = false;
@@ -823,6 +829,15 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
         }
         return Path.Combine(docs, "OvenTracker");
     }
+
+    /// <summary>Below this, a battery meter's charge is mentioned before a run: a long session will probably need a swap.</summary>
+    public const double BatteryNotePercent = 60;
+
+    /// <summary>What to say on connecting about a battery that won't last a long session, or null.</summary>
+    public static string? BatteryNote(double? percent) => percent is { } p && p < BatteryNotePercent
+        ? $"The meter's battery is at {p.ToString("F0", Inv)} %, and a long session will probably need a fresh one. " +
+          "When it runs low the app pauses, so you can swap it, then carries on with the same setpoint."
+        : null;
 
     /// <summary>The driver to use: the one asked for, or the one that answered last time, or the default.</summary>
     public static IMeterDriver ChooseDriver(RunSettings s, AppSettings settings)

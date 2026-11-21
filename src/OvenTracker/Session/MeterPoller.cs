@@ -70,8 +70,23 @@ public sealed class MeterPoller : IDisposable
     /// </summary>
     public TimeSpan SilentFor => lastGoodAt is { } g ? MeterTimeSince(g, attemptAtLastGood) : TimeSpan.Zero;
 
-    /// <summary>Battery is checked every this many readings.</summary>
-    public int BatteryEvery { get; init; } = 300;
+    /// <summary>Battery is checked every this many readings (each minute at the usual interval), and on (re)connecting.</summary>
+    public int BatteryEvery { get; init; } = 60;
+
+    bool batteryDue = true;
+    bool? lowBatteryFlag;
+
+    /// <summary>Checks the battery at the next reading: after a battery swap, say.</summary>
+    public void RequestBattery() => batteryDue = true;
+
+    /// <summary>How many times the battery has been read: a pause waits for a fresh reading before trusting it again.</summary>
+    public long BatteryReads { get; private set; }
+
+    /// <summary>
+    /// Whether the meter's battery is low: its own flag where it has one (the 121GW), otherwise its level against
+    /// <see cref="Ui.BatteryText.LowPercent"/>. Null for a meter that says nothing about a battery.
+    /// </summary>
+    public bool? LowBattery => lowBatteryFlag ?? (BatteryPercent is { } p ? Ui.BatteryText.IsLow(p) : null);
 
     public void Start()
     {
@@ -114,6 +129,7 @@ public sealed class MeterPoller : IDisposable
                 if (!IsConnected)
                 {
                     meter.Connect();
+                    batteryDue = true; // a meter back from being off may have a new battery
                     IsConnected = true;
                     State = LinkState.Connected;
                     failures = 0;
@@ -122,7 +138,13 @@ public sealed class MeterPoller : IDisposable
                 {
                     try { command(meter); } catch { /* a beep that fails is not worth losing the link over */ }
                 }
-                if (ReadCount % BatteryEvery == 0) BatteryPercent = meter.ReadBatteryPercent() ?? BatteryPercent;
+                if (batteryDue || ReadCount % BatteryEvery == 0)
+                {
+                    BatteryPercent = meter.ReadBatteryPercent() ?? BatteryPercent;
+                    lowBatteryFlag = meter.ReadLowBattery();
+                    batteryDue = false;
+                    BatteryReads++;
+                }
                 attempts++;
                 var r = meter.Read();
                 ReadCount++;

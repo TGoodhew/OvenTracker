@@ -158,7 +158,8 @@ starts above the setting and has to cool to it. `minUnits` is `o.minBlocks` when
 
 1. If `phase` is Complete, stop.
 2. Add (t, c) to the series. If it is rejected (t not after the last), stop.
-3. If `startC` is none, `startC = c`.
+3. If `startC` is none, `startC = c`. Then, if there was a sample before and this one comes more than
+   `GapSeconds` (120 s) after it, it's a **gap** ([below](#gaps)).
 4. Smoothing: update the window and compute `smooth` ([below](#smoothing)).
 5. Noise: append c to the noise window, dropping the oldest beyond 120 values. If the series now holds a
    multiple of 30 samples, `noiseSigma = noiseSigma(noise window)`.
@@ -177,7 +178,24 @@ starts above the setting and has to cool to it. `minUnits` is `o.minBlocks` when
    `unitStart`.
 9. If `phase` isn't Complete and `t − lastFlatCheck ≥ 10`: `lastFlatCheck = t`, then apply the
    [no-cycle rule](#blocks-and-the-no-cycle-rule).
-10. If `phase` isn't Complete and `t ≥ o.maxPointMinutes · 60`, complete as TimedOut.
+10. If `phase` isn't Complete and `t − gapSeconds ≥ o.maxPointMinutes · 60`, complete as TimedOut: the time in
+    gaps doesn't count.
+
+### Gaps
+
+A gap of more than `GapSeconds` (120 s) between two samples is the meter off for a while: a battery swap
+(`run` pauses for one, and records the readings meanwhile outside the setpoint), its auto power-off, a long
+dropout. Two minutes is longer than a Bluetooth link takes to come back (dropouts of up to 90 s are common)
+and shorter than a swap. The readings either side aren't joined up. When the sample after a gap arrives, before
+the smoothing:
+
+- `gapSeconds += t − previous t`, and `resumedAt = t`;
+- the smoothing window and its sum are cleared, and the turning-point detector starts afresh;
+- if `phase` is Measuring: a Block in progress restarts (`unitStart = t`); a cycle in progress is dropped
+  (`awaitingTrough` is set: the next Trough starts a new cycle without closing one, so no cycle crosses the gap).
+
+The cycles before the gap are kept, so the setpoint carries on where it was, with no reheat. Only the cycle
+the gap broke is lost. Shorter gaps are joined, as before.
 
 ### Smoothing
 
@@ -261,7 +279,8 @@ the heat-up and the first peak are never part of a unit.
 
 For a Trough `tp` (with `kind` not Block):
 
-- If `phase` is Measuring: close the cycle `[unitStart, tp.T]`. If it was kept, `unitStart = tp.T`. If it was
+- If `phase` is Measuring and `awaitingTrough` is set (a gap broke the cycle): `unitStart = tp.T` and clear
+  `awaitingTrough`. Otherwise, if `phase` is Measuring: close the cycle `[unitStart, tp.T]`. If it was kept, `unitStart = tp.T`. If it was
   too short to keep (under `MinUnitSeconds`, 20 s), `unitStart` stays where it was: the trough was a disturbance,
   and the cycle carries on to the next one.
 - Otherwise, if `phase` is Settling and `turningPoints` holds at least 2: `phase = Measuring`,
@@ -276,7 +295,8 @@ Some ovens hold temperature without a visible on/off cycle. With no turning poin
 trace, the steady state is cut into fixed blocks of `o.blockMinutes` (3 min) instead.
 
 The rule runs at most every 10 s of t ([step 9](#each-sample)). With `last` the `confirmedAt` of the latest
-turning point, in `turningPoints` or among the set-aside approach turns (0 if none), `quiet = t − last`, and `noCycle = o.noCycleMinutes · 60`:
+turning point, in `turningPoints` or among the set-aside approach turns, or `resumedAt` after a gap if later (0
+if none), `quiet = t − last`, and `noCycle = o.noCycleMinutes · 60`:
 
 - **Measuring cycles, but the cycling has stopped.** If `phase` is Measuring and `kind` is Cycle:
   `expected = expectedUnitSeconds() ?? o.defaultCycleMinutes · 60`. If `quiet ≥ max(3 · expected, noCycle)` and
@@ -345,7 +365,7 @@ A setpoint completes when the first of these happens:
 | Reason | When |
 | --- | --- |
 | `Converged` | A unit closes, and then there are at least `minUnits` units and `WithinPrecision(halfWidth, o.precisionC)`. |
-| `TimedOut` | A sample with `t ≥ o.maxPointMinutes · 60` arrives, after that sample's processing, if it is still not complete. |
+| `TimedOut` | A sample with `t − gapSeconds ≥ o.maxPointMinutes · 60` arrives, after that sample's processing, if it is still not complete. |
 | `Manual` | The user finished it early (N twice). |
 | `Skipped` | The user skipped it (S twice). |
 | `Aborted` | The session stopped (Q twice, Ctrl+C, an error), or a replay found no end. |

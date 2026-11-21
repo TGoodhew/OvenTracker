@@ -86,6 +86,17 @@ public sealed class SimulatedMeter(SimulatedOven oven, double intervalSeconds) :
 
     /// <summary>How long the simulated meter stays off before "someone presses a button".</summary>
     public TimeSpan WakesAfter { get; set; } = TimeSpan.FromMinutes(2);
+
+    /// <summary>How long the battery lasts, as --sim-battery sets it: forever (null) by default.</summary>
+    public TimeSpan? BatteryLastsFor { get; set; }
+
+    DateTimeOffset batterySince = DateTimeOffset.UtcNow;
+    readonly Random batteryNoise = new(7);
+
+    /// <summary>The battery's charge: 81.4 % for ever, or running down over <see cref="BatteryLastsFor"/>.</summary>
+    public double BatteryPercent => BatteryLastsFor is { } lasts
+        ? Math.Max(0, 100 - 100 * (clock - batterySince).TotalSeconds / lasts.TotalSeconds)
+        : 81.4;
     static readonly MeterConfig Config = new("type K, °C (simulated)", true, TempUnit.Celsius, Sensor.Thermocouple("K"));
 
     public SimulatedOven Oven => oven;
@@ -107,15 +118,30 @@ public sealed class SimulatedMeter(SimulatedOven oven, double intervalSeconds) :
             offSince = null; // someone pressed a button
             awakeSince = clock;
         }
-        var v = Math.Round(oven.ProbeC(), 1);
+        var probe = oven.ProbeC();
+        // A nearly flat battery gives false readings, as a real one does: jumping tens of degrees.
+        if (BatteryLastsFor is not null && BatteryPercent < 10) probe += (batteryNoise.NextDouble() - 0.5) * 100;
+        var v = Math.Round(probe, 1);
         return new MeterReading(clock, ReadingStatus.Ok, v, v.ToString("F1", System.Globalization.CultureInfo.InvariantCulture));
     }
 
-    public double? ReadBatteryPercent() => 81.4;
+    public double? ReadBatteryPercent() => BatteryPercent;
     public AutoPowerOffSetting ReadAutoPowerOff() => AutoPowerOffAfter is { } t ? AutoPowerOffSetting.On(t) : AutoPowerOffSetting.Off;
     public void SetOven(OvenMode mode, double? setpointC) => oven.Set(mode, setpointC);
     public void SetAdjustment(double adjustmentC) => oven.AdjustmentC = adjustmentC;
     public void SetAutoPowerOff(TimeSpan? after) => AutoPowerOffAfter = after;
+
+    public void SetBattery(TimeSpan? lastsFor)
+    {
+        BatteryLastsFor = lastsFor;
+        batterySince = clock;
+    }
+
+    public void SwapBattery()
+    {
+        offSince = clock; // switched off for the swap, back on after WakesAfter
+        batterySince = clock + WakesAfter;
+    }
 
     public void PretendUsed(double setpointC)
     {
@@ -133,6 +159,7 @@ public sealed class SimulatedDriver : IMeterDriver
     public const string DriverName = "simulated";
 
     public string Name => DriverName;
+    public bool HasBattery => true;
     public string Description => "a simulated oven and meter";
     public string ResourceHelp => "nothing (there is only one)";
     public bool IsSimulation => true;
