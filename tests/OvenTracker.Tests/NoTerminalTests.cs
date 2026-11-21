@@ -58,6 +58,51 @@ public class NoTerminalTests
         }
     }
 
+    /// <summary>Reads a file the app may be writing at that moment.</summary>
+    static string? ReadShared(string path)
+    {
+        try
+        {
+            using var s = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            return new StreamReader(s).ReadToEnd();
+        }
+        catch (IOException) { return null; }
+    }
+
+    [Fact]
+    public async Task EachSetpointIsSavedAsItFinishesNotOnlyAtTheEnd()
+    {
+        // #43: a crash at the end lost the whole report. While the second setpoint is being measured, the first must
+        // already be in results.json and report.md.
+        var dir = Path.Combine(Path.GetTempPath(), "OvenTrackerSaved-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var session = RunWithoutATerminal(
+                "--simulate", "--speed", "3000", "--interval", "10", "-y",
+                "--unit", "F", "--modes", "bake", "--setpoints", "350,400", "--out", dir);
+            string? seen = null;
+            while (!session.IsCompleted && seen is null)
+            {
+                await Task.Delay(5);
+                var csv = ReadShared(Path.Combine(dir, "readings.csv"));
+                if (csv is null || !csv.Contains(",2,Bake,") || csv.Contains(",2,Bake,") && csv[csv.IndexOf(",2,Bake,")..].Contains("end:")) continue;
+                seen = ReadShared(Path.Combine(dir, "results.json"));
+            }
+            var (code, output) = await session;
+            Assert.Equal(0, code);
+            Assert.True(seen is not null, "the second setpoint was never seen in progress:\n" + output);
+            // The session (with its whole plan) and the first setpoint's result, not yet the second's.
+            var saved = System.Text.Json.JsonDocument.Parse(seen!).RootElement.GetProperty("results");
+            Assert.Equal(1, saved.GetArrayLength());
+            Assert.Equal(1, saved[0].GetProperty("point").GetProperty("index").GetInt32());
+            Assert.True(File.Exists(Path.Combine(dir, "report.md")));
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        }
+    }
+
     [Fact]
     public async Task WithoutATerminalItSaysWhatItCantAsk()
     {

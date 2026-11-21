@@ -6,6 +6,8 @@ port doesn't cover it, or a `parity` issue is open), or **Python**.
 
 ## Unreleased
 
+- Stopping a session no longer crashes the app if the meter is busy (a Bluetooth write timing out after Stop), and `results.json` and `report.md` are saved as each setpoint finishes, so a crash, a closed window or a second Ctrl+C loses at most the setpoint in progress (#43). Has: **both**.
+
 - Consistency fixes in the analysis and recording (#36). Has: **both**.
   - **Recording:**
     - `readings.csv` keeps full precision, so re-analysing a run gives exactly its live results.

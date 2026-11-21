@@ -110,6 +110,16 @@ class MeterPoller:
             time.sleep(min(left, 0.05))
 
     def _loop(self) -> None:
+        """The thread's body (MeterPoller.Loop). Nothing escapes it, and it always ends Stopped (#43)."""
+        try:
+            self._poll()
+        except Exception as ex:
+            self.last_error = str(ex)
+            self.last_error_at = datetime.now(timezone.utc)
+        finally:
+            self.state = LinkState.Stopped
+
+    def _poll(self) -> None:
         period = self._interval / self._speed
         nxt = 0.0
         failures = 0
@@ -186,7 +196,6 @@ class MeterPoller:
                 self._wait(wait)
             else:
                 nxt = self._elapsed()  # fell behind (slow reply): do not try to catch up in a burst
-        self.state = LinkState.Stopped
 
     def stop(self) -> None:
         self._stop.set()

@@ -450,6 +450,15 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
         var prompt = new ChangePrompt(poller, recorder, f, TimeSpan.FromMinutes(s.Remind));
         var ask = ChangePrompt.ShouldAsk(s.Yes, driver.IsSimulation, !Console.IsInputRedirected);
         string? lastDone = null; // what was just finished, for the prompt
+
+        // results.json and report.md as they stand: after each setpoint, and at the end.
+        Report SaveResults()
+        {
+            results = [.. results.OrderBy(r => r.Point.Index)];
+            var now = new Report(info, results);
+            recorder.WriteResults(info, results, now.Markdown());
+            return now;
+        }
         PointResult? previous = null; // the setpoint just measured in this sitting, if the oven went straight on from it
         var firstPrompt = true;
 
@@ -565,6 +574,13 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
                 afterReset = false;
                 results.RemoveAll(r => r.Point.Index == point.Index);
                 results.Add(result);
+                // Saved as each setpoint finishes, so a crash, a closed window or a second Ctrl+C loses at most the
+                // setpoint in progress, not the report (#43). A save that fails (a full disk) mustn't stop the measuring.
+                try { SaveResults(); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    AnsiConsole.MarkupLine($"[yellow]Couldn't save the results so far: {Markup.Escape(ex.Message)}. The readings are still being recorded.[/]");
+                }
                 poller.Enqueue(m => m.Beep());
                 ConsoleCaps.Bell();
                 ConsoleReport.PointSummary(new Report(info, results), result);
@@ -592,15 +608,14 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
         }
         finally
         {
-            oven?.SetOven(OvenMode.Bake, null);
-            poller.Stop();
-            DrainIdle(poller, recorder);
-            meter.Dispose();
+            // Each step on its own: a meter or link failing as it closes must not stop the results being written.
+            try { oven?.SetOven(OvenMode.Bake, null); } catch { }
+            try { poller.Stop(); } catch { }
+            try { DrainIdle(poller, recorder); } catch { }
+            try { meter.Dispose(); } catch { }
         }
 
-        results = [.. results.OrderBy(r => r.Point.Index)];
-        var report = new Report(info, results);
-        recorder.WriteResults(info, results, report.Markdown());
+        var report = SaveResults();
         AnsiConsole.WriteLine();
         if (results.Count > 0) ConsoleReport.Full(report);
         AnsiConsole.WriteLine();

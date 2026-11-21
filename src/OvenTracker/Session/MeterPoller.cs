@@ -81,7 +81,25 @@ public sealed class MeterPoller : IDisposable
 
     public void Enqueue(Action<ITemperatureMeter> command) => commands.Enqueue(command);
 
+    /// <summary>
+    /// The thread's body. Nothing may escape it: an exception on a thread of its own ends the process, so a meter
+    /// failing while the session stops (a Bluetooth write timing out after Stop, say) would lose the report.
+    /// </summary>
     void Loop()
+    {
+        try { Poll(); }
+        catch (Exception ex)
+        {
+            LastError = ex.Message;
+            LastErrorAt = DateTimeOffset.UtcNow;
+        }
+        finally
+        {
+            State = LinkState.Stopped;
+        }
+    }
+
+    void Poll()
     {
         var token = cts.Token;
         var period = TimeSpan.FromTicks((long)(interval.Ticks / speed));
@@ -115,8 +133,10 @@ public sealed class MeterPoller : IDisposable
                 if (r is { Status: ReadingStatus.Ok, Celsius: { } c }) LastCelsius = c;
                 readings.Writer.TryWrite(r);
             }
-            catch (Exception ex) when (!token.IsCancellationRequested)
+            catch (Exception ex)
             {
+                // Stopping: whatever the meter was doing when Stop came (a read can block for its whole timeout), it's done.
+                if (token.IsCancellationRequested) break;
                 failures++;
                 LastError = ex.Message;
                 LastErrorAt = DateTimeOffset.UtcNow;
@@ -149,7 +169,6 @@ public sealed class MeterPoller : IDisposable
             if (wait > TimeSpan.Zero) token.WaitHandle.WaitOne(wait);
             else next = clock.Elapsed; // fell behind (slow reply): do not try to catch up in a burst
         }
-        State = LinkState.Stopped;
     }
 
     public void Stop()
