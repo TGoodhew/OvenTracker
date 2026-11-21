@@ -3,9 +3,16 @@
 [![CI](https://github.com/TGoodhew/OvenTracker/actions/workflows/ci.yml/badge.svg)](https://github.com/TGoodhew/OvenTracker/actions/workflows/ci.yml)
 
 Checks how accurate an oven's temperature setting really is, in **bake** and **convection**, using a
-Keysight (Agilent) **U1253B** multimeter with a type K thermocouple, read over Bluetooth through a
-**U1177A** IR-to-Bluetooth adapter. A .NET 11 console app for **Windows and Linux**, with a live
-[Spectre.Console](https://spectreconsole.net) display.
+connected multimeter with a type K thermocouple: a Keysight (Agilent) **U1253B** (through a U1177A
+IR-to-Bluetooth adapter), an EEVblog **121GW** (Bluetooth LE) or an HP **34401A** bench meter (GPIB or
+RS-232). [Other meters](#other-meters) has the details.
+
+It comes in two versions, with the same commands, screens and results:
+- **The .NET 11 app,** for Windows and Linux, with a live [Spectre.Console](https://spectreconsole.net)
+  display.
+- **The Python version** ([`python/`](python/README.md)), with a live [Rich](https://github.com/Textualize/rich)
+  display. It's a `pip install` away on Linux (a Raspberry Pi makes a good oven-side logger), and it runs on
+  Windows too.
 
 For each setpoint it works out by itself when the oven has settled and how long it has to keep
 measuring. It then reports the true average temperature, how far that is from the setting, how much the
