@@ -34,7 +34,19 @@ def _env() -> dict[str, str]:
     env["NO_COLOR"] = "1"
     env.pop("FORCE_COLOR", None)
     env.pop("COLUMNS", None)
+    # Spectre.Console recognises CI services by these and then writes ANSI codes and wraps differently even when
+    # redirected; Rich doesn't. Both apps should see the same plain, redirected console.
+    for name in _CI_VARIABLES:
+        env.pop(name, None)
     return env
+
+
+#: The variables Spectre.Console's profile enrichers look for (GitHub Actions, Azure Pipelines, GitLab, …).
+_CI_VARIABLES = (
+    "GITHUB_ACTIONS", "TF_BUILD", "CI_SERVER", "GITLAB_CI", "APPVEYOR", "TRAVIS", "JENKINS_URL", "TEAMCITY_VERSION",
+    "BITBUCKET_COMMIT", "BITBUCKET_REPO_OWNER", "BITBUCKET_REPO_SLUG", "BITRISE_BUILD_URL", "GO_SERVER_URL",
+    "bamboo_buildNumber", "ContinuaCI.Version", "BuildRunner",
+)
 
 
 def python_app(*args: str) -> subprocess.CompletedProcess[str]:
