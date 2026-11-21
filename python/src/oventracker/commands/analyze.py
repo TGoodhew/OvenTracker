@@ -75,8 +75,16 @@ def load(path: str) -> SavedRun | None:
         with open(session_path, encoding="utf-8-sig") as fh:
             info = SessionInfo.from_json(json.load(fh))
     else:
+        # No session.json: take it as a °F oven with run's defaults for one (2 °F precision, 15 °F tolerance).
         info = SessionInfo(
-            __version__, _creation_time(csv), "unknown meter", "?", TempUnit.Fahrenheit, 15 / 1.8, AnalysisOptions(), []
+            __version__,
+            _creation_time(csv),
+            "unknown meter",
+            "?",
+            TempUnit.Fahrenheit,
+            15 / 1.8,
+            AnalysisOptions(precision_c=2 / 1.8),
+            [],
         )
     return SavedRun(directory, csv, info)
 
@@ -95,11 +103,12 @@ def combine(
     if len(runs) == 1:
         first = runs[0].info
         only = replace(first, adjustment_c=adjustment_c if adjustment_c is not None else first.adjustment_c)
-        # Points keep the plan's adjustment (a characterise run has two).
+        # Points keep the plan's adjustment (a characterise run has two), in the plan's order, as `run` writes them.
         replayed = []
-        for r in replay(runs[0].csv, options(only)):
+        for r in replay(runs[0].csv, options(only), only.plan):
             planned = next((p for p in only.plan if p.index == r.point.index), None)
             replayed.append(replace(r, point=planned if planned is not None else r.point))
+        replayed.sort(key=lambda r: r.point.index)
         return only, replayed
 
     ordered = sorted(runs, key=lambda r: r.info.started.utc_ticks)
@@ -109,17 +118,16 @@ def combine(
             adj = run.info.adjustment_c
         else:
             adj = adjustment_c if adjustment_c is not None else 0.0
-        for r in replay(run.csv, options(run.info)):
+        for r in sorted(replay(run.csv, options(run.info), run.info.plan), key=lambda r: r.point.index):
             # A point keeps the adjustment its plan gave it (a characterisation has two); otherwise the run's.
             plan = next((p for p in run.info.plan if p.index == r.point.index), None)
             planned = None if plan is None else plan.adjustment_c
             point: TestPoint = replace(r.point, index=len(results) + 1, adjustment_c=planned if planned is not None else adj)
             results.append(replace(r, point=point))
     latest = ordered[-1].info
-    if latest.adjustment_c is not None:
-        adj_latest = latest.adjustment_c
-    else:
-        adj_latest = adjustment_c if adjustment_c is not None else 0.0
+    # The current adjustment is the latest run's, or --adjustment's. Unknown stays unknown (the report then says
+    # "change it by" rather than "set it to"), as for a single run.
+    adj_latest = latest.adjustment_c if latest.adjustment_c is not None else adjustment_c
     return replace(latest, adjustment_c=adj_latest, plan=[r.point for r in results]), results
 
 

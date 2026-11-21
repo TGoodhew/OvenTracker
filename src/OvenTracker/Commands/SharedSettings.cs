@@ -75,6 +75,8 @@ public abstract class SharedSettings : CommandSettings
         if (AdjustStep is <= 0) return ValidationResult.Error("--adjust-step must be positive.");
         if (AdjustRange is <= 0) return ValidationResult.Error("--adjust-range must be positive.");
         if (Favour is <= 0) return ValidationResult.Error("--favour must be a temperature, e.g. 350.");
+        if (Favour is not null && Objective is not null)
+            return ValidationResult.Error("--favour and --objective don't go together: --favour makes the oven right at one temperature, in place of an objective.");
         if (Oven is not null && OvenProfiles.Find(Oven) is null) return ValidationResult.Error($"--oven must be one of: {OvenProfiles.Keys()}. To add yours, see docs/adding-an-oven.md.");
         if (Probe is not null && Probes.Find(Probe) is null) return ValidationResult.Error($"--probe must be one of: {Probes.Keys}. For another, give --probe-tolerance (and --probe-max).");
         if (ProbeTolerance is not null && Probes.ParseTolerance(ProbeTolerance, TempUnit.Celsius) is null)

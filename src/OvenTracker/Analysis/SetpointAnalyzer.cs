@@ -89,7 +89,7 @@ public sealed record PointMetrics(
     double? LongestGapSeconds = null)
 {
     public double? OffsetC => MeanC - SetpointC;
-    public bool MetPrecision => HalfWidthC is { } hw && hw <= PrecisionTargetC + 1e-9;
+    public bool MetPrecision => HalfWidthC is { } hw && SetpointAnalyzer.WithinPrecision(hw, PrecisionTargetC);
 }
 
 /// <summary>
@@ -212,8 +212,8 @@ public sealed class SetpointAnalyzer
 
         if (Phase == PointPhase.Measuring)
         {
-            CloseUnit(UnitKind.Cycle, unitStart, tp.T);
-            unitStart = tp.T;
+            // A trough too soon after the last is a disturbance, not a cycle: the cycle carries on to the next one.
+            if (CloseUnit(UnitKind.Cycle, unitStart, tp.T)) unitStart = tp.T;
         }
         else if (Phase == PointPhase.Settling && turningPoints.Count >= 2)
         {
@@ -257,20 +257,28 @@ public sealed class SetpointAnalyzer
         unitStart = t;
     }
 
-    void CloseUnit(UnitKind kind, double t0, double t1)
+    /// <summary>The shortest a unit can be: a reversal quicker than this is a disturbance, not a cycle.</summary>
+    public const double MinUnitSeconds = 20;
+
+    /// <summary>Whether a half-width meets the precision target: the stopping rule and <see cref="PointMetrics.MetPrecision"/> use the same test.</summary>
+    public static bool WithinPrecision(double halfWidthC, double targetC) => halfWidthC <= targetC + 1e-9;
+
+    /// <returns>False if the stretch is too short to be a unit, so it stays part of the next one.</returns>
+    bool CloseUnit(UnitKind kind, double t0, double t1)
     {
-        if (t1 - t0 < 20) return; // a reversal this quick is a disturbance, not a cycle
+        if (t1 - t0 < MinUnitSeconds) return false;
         var (min, max) = series.Range(t0, t1);
         units.Add(new MeasurementUnit(kind, t0, t1, series.Mean(t0, t1), min, max));
         if (kind == UnitKind.Cycle) cycleDurations.Add(t1 - t0);
         Evaluate();
+        return true;
     }
 
     void Evaluate()
     {
         DropWarmUpUnits();
         var e = CurrentEstimate;
-        if (e is { HalfWidthC: { } hw } && e.N >= MinUnits && hw <= o.PrecisionC)
+        if (e is { HalfWidthC: { } hw } && e.N >= MinUnits && WithinPrecision(hw, o.PrecisionC))
             Complete(CompletionReason.Converged);
     }
 

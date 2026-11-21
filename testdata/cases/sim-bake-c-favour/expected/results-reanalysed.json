@@ -50,7 +50,7 @@
     "adjust": {
       "stepC": 0.5555555555555556,
       "rangeC": 19.444444444444443,
-      "objective": "Minimax",
+      "objective": "Balanced",
       "favourC": 200,
       "model": "Shift",
       "sharedAcrossModes": true

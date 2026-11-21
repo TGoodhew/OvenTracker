@@ -14,8 +14,7 @@ Run 2026-11-20 15:59 with OvenTracker simulated meter on simulator. A setpoint i
 | Bake | 350 °F (started warm) | 363.5 °F | +13.5 °F | 0.3 °F | Accurate | 33.8 °F | 346–380 | 2.9 min | 7 min | — | 34 min | 4 cycles |
 | Bake | 425 °F | 437.4 °F | +12.4 °F | 0.2 °F | Accurate | 33.5 °F | 420–454 | 3.0 min | 4 min | +22.3 °F | 34 min | 4 cycles |
 
-*Measured* is the time-weighted mean over whole thermostat cycles once the oven had settled; *±95 %* is how sure that mean is. *Swing* is the average peak-to-peak of a cycle and *Range* the lowest and highest readings while measuring. *To temp* is from pressing Start to first reaching the setting (or the thermostat first turning round, for an oven that runs cold); *First peak* is the first high point against the setting, which is the overshoot when it is positive.
- The setpoint marked *started warm* began with the oven still warm, not from cold, so its *To temp* and *First peak* aren't from cold. Its mean is as good as any.
+*Measured* is the time-weighted mean over whole thermostat cycles once the oven had settled; *±95 %* is how sure that mean is. *Swing* is the average peak-to-peak of a cycle and *Range* the lowest and highest readings while measuring. *To temp* is from pressing Start to first reaching the setting (or the thermostat first turning round, for an oven that runs cold); *First peak* is the first high point against the setting, which is the overshoot when it is positive. The setpoint marked *started warm* began with the oven still warm, not from cold, so its *To temp* and *First peak* aren't from cold. Its mean is as good as any.
 
 ## Best adjustment
 

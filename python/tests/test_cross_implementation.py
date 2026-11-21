@@ -1,10 +1,9 @@
 """The two implementations agree on runs the Python app records.
 
-- Python's analyze of a Python-recorded simulated run reproduces that run's own results.json and report.md, as
-  the C# app's analyze does for its runs. The one difference is by design: a run's results use the plan's
-  setpoint, and analyze the one in readings.csv, written with three decimals (spec/recording.md), so in °F the
-  setpoint and what is measured against it differ in the fourth decimal. In °C, with whole setpoints, nothing
-  differs at all.
+- Python's analyze of a Python-recorded simulated run reproduces that run's own results.json and report.md
+  exactly, in °F as in °C, as the C# app's analyze does for its runs: readings.csv keeps full-precision numbers
+  (spec/recording.md), and analyze takes the setpoints from the plan, so nothing differs.
+- The recording's events are in time order, on the simulator's clock like its readings.
 - When the .NET SDK is installed, the C# app's analyze of the same run gives the same results as Python's
   (testdata/tools/compare.py), and the same console report. Skipped without dotnet.
 
@@ -83,32 +82,31 @@ def _as_pair(tmp: Path, run: Path, analysed: Path) -> tuple[Path, Path]:
     return a, b
 
 
-def test_in_celsius_python_analyze_reproduces_the_runs_own_results_and_report(runs, tmp_path):
+@pytest.mark.parametrize("unit", ["f", "c"])
+def test_python_analyze_reproduces_the_runs_own_results_and_report(runs, tmp_path, unit):
     analysed = tmp_path / "out"
-    p = python_app("analyze", str(runs["c"]), "--out", str(analysed))
+    p = python_app("analyze", str(runs[unit]), "--out", str(analysed))
     assert p.returncode == 0, p.stdout + p.stderr
-    diffs = load_compare().compare_dirs(*map(str, _as_pair(tmp_path, runs["c"], analysed)))
+    diffs = load_compare().compare_dirs(*map(str, _as_pair(tmp_path, runs[unit], analysed)))
     assert not diffs, "\n".join(diffs)
 
 
-def test_in_fahrenheit_only_the_three_decimal_setpoint_differs(runs, tmp_path):
-    compare = load_compare()
-    analysed = tmp_path / "out"
-    p = python_app("analyze", str(runs["f"]), "--out", str(analysed))
-    assert p.returncode == 0, p.stdout + p.stderr
-    run_dir, analysed_dir = _as_pair(tmp_path, runs["f"], analysed)
-    expected = json.loads((run_dir / "results.json").read_text(encoding="utf-8"))
-    actual = json.loads((analysed_dir / "results.json").read_text(encoding="utf-8"))
-    allowed = ("metrics.setpointC", "metrics.offsetC", "metrics.overshootC")
-    for diff in compare.compare_json(expected, actual):
-        path = diff.split(":")[0]
-        assert path.endswith(allowed), diff
-    for e, a in zip(expected["results"], actual["results"]):
-        for key in ("setpointC", "offsetC", "overshootC"):
-            if key in e["metrics"]:
-                assert abs(e["metrics"][key] - a["metrics"][key]) < 5e-4
-    # The report shows one decimal at most, so it is the same.
-    assert not compare.compare_text((run_dir / "report.md").read_text(encoding="utf-8"), (analysed_dir / "report.md").read_text(encoding="utf-8"))
+@pytest.mark.parametrize("unit", ["f", "c"])
+def test_the_recording_keeps_full_precision_and_time_order(runs, unit):
+    lines = (runs[unit] / "readings.csv").read_text(encoding="utf-8").splitlines()[1:]
+    rows = [line.split(",") for line in lines]
+    assert all(len(r) == 9 for r in rows)
+    # Events and readings on one clock: the seven-digit UTC times sort as text.
+    times = [r[0] for r in rows]
+    assert times == sorted(times)
+    # Every number reads back exactly: a °F setpoint is the plan's 176.66666666666666, not 176.667.
+    plan = json.loads((runs[unit] / "session.json").read_text(encoding="utf-8"))["plan"]
+    setpoints = {p["setpointC"] for p in plan}
+    assert {float(r[3]) for r in rows if r[3]} == setpoints
+    # Round-trip text, not a fixed number of decimals: 5 is "5", never "5.0".
+    for r in rows:
+        for text in (r[3], r[4], r[6]):
+            assert not text.endswith(".0"), r
 
 
 @pytest.fixture(scope="module")

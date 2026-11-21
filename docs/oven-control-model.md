@@ -39,12 +39,13 @@ an objective:
 | --- | --- | --- |
 | Balanced (default) | `--objective balanced` | Makes the sum of squared errors across the measured setpoints as small as it can (least squares). |
 | Worst case | `--objective minimax` | Makes the largest error at any measured setpoint as small as it can. |
-| A favoured temperature | `--favour 350` | Makes the oven right at that temperature (from a straight line through the setpoints), and lets the others fall where they may. |
+| A favoured temperature | `--favour 350` | Makes the oven right at that temperature (from a straight line through each mode's setpoints), and lets the others fall where they may. With one adjustment for bake and convection, it makes the two modes' errors there as small as it can together. It replaces the objective, so it can't be given with `--objective`. |
 
-*Δ* is then rounded to the oven's steps (`--adjust-step`, 1 °F by default) and kept within its range
-(`--adjust-range`, ±35 °F by default, as on the PHS925). For balanced and worst case, the objective is
-convex in *Δ*, so the app takes whichever of the two neighbouring steps is better. On a tie it takes the
-smaller change.
+*Δ* is kept to the oven's steps (`--adjust-step`, 1 °F by default) and within its range (`--adjust-range`,
+±35 °F by default, as on the PHS925). For balanced and worst case the app tries every step in the range and
+takes the best; on a tie it takes the smaller change. When the current adjustment isn't known, the app can't
+tell how much of the range is left, so it only rules out changes that are impossible from any setting (more
+than twice the range).
 
 Most ovens have one adjustment for bake and convection, so by default the app fits both modes' setpoints
 together. `--separate-adjustments` gives each mode its own recommendation.

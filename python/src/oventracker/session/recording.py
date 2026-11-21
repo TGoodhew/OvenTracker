@@ -6,10 +6,10 @@ import os
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable
 
 from .. import jsonio
-from ..netfmt import fixed
+from ..netfmt import round_trip
 from ..analysis.adjustment_advisor import AdjustmentOptions
 from ..analysis.characterisation import CharacteriseInfo
 from ..analysis.session_summary import PointResult, TestPoint
@@ -131,6 +131,19 @@ def _write_all_text(path: str, text: str) -> None:
         fh.write(text)
 
 
+def clean(text: str) -> str:
+    """Text for a CSV field (RunRecorder.Clean): commas become semicolons, and quotes and line breaks are dropped,
+    so every row keeps its nine fields. Used for ``raw`` and for event names (a ``prompt:`` event carries the
+    prompt's words)."""
+    return text.replace(",", ";").replace('"', "").replace("\r", "").replace("\n", " ")
+
+
+def number(v: float) -> str:
+    """A number as written to readings.csv (RunRecorder.Number): the shortest text that reads back as exactly the
+    same double ("R"), so re-analysing a recording gives exactly what the live run did."""
+    return round_trip(v)
+
+
 class RunRecorder:
     """Writes every reading to readings.csv as it arrives (flushed each line, so nothing is lost if the PC sleeps
     or the app is closed), with the events the analysis needs to be replayed (Session/Recording.cs)."""
@@ -138,6 +151,10 @@ class RunRecorder:
     def __init__(self, directory: str, info: SessionInfo, append: bool = False):
         """``append``: carry on a run saved earlier, adding to its readings.csv instead of starting a new one."""
         self.directory = directory
+        self.clock: Callable[[], datetime] | None = None
+        """For a simulation, the simulated clock: events then take its time, so readings.csv stays in order."""
+        self.last_reading_time: datetime | None = None
+        """The time of the last reading written."""
         os.makedirs(directory, exist_ok=True)
         _write_all_text(os.path.join(directory, "session.json"), jsonio.dumps(info))
         path = self.csv_path
@@ -150,6 +167,12 @@ class RunRecorder:
     def csv_path(self) -> str:
         return os.path.join(self.directory, "readings.csv")
 
+    @property
+    def now(self) -> datetime:
+        """The time for an event: the PC's clock, or for a simulation the simulated clock (set ``clock``), so events
+        and readings in readings.csv are on the same clock and in order."""
+        return self.clock() if self.clock is not None else datetime.now(timezone.utc)
+
     def _line(self, text: str) -> None:
         # StreamWriter.WriteLine with AutoFlush: the platform's newline, flushed at once.
         self._csv.write(text + os.linesep)
@@ -157,21 +180,22 @@ class RunRecorder:
 
     def note(self, time: datetime, name: str) -> None:
         """Something that happened outside any setpoint: "resume", "reset", "reset-start", "reset-end:…", …"""
-        self._line(",".join([utc_round_trip(time), "0", "", "", "", "Event", "", "", name]))
+        self._line(",".join([utc_round_trip(time), "0", "", "", "", "Event", "", "", clean(name)]))
 
     def reading(self, r: Any, point: TestPoint | None, elapsed: float | None) -> None:
         """A reading (a meter.base.MeterReading), in a setpoint or (point None) outside one."""
+        self.last_reading_time = r.time
         self._line(
             ",".join(
                 [
                     utc_round_trip(r.time),
                     str(point.index) if point is not None else "0",
                     point.mode.name if point is not None else "",
-                    "" if point is None else fixed(point.setpoint_c, 3),
-                    fixed(elapsed, 1) if elapsed is not None else "",
+                    "" if point is None else number(point.setpoint_c),
+                    number(elapsed) if elapsed is not None else "",
                     r.status.name,
-                    fixed(r.celsius, 2) if r.celsius is not None else "",
-                    r.raw.replace(",", ";").replace('"', ""),
+                    number(r.celsius) if r.celsius is not None else "",
+                    clean(r.raw),
                     "",
                 ]
             )
@@ -184,12 +208,12 @@ class RunRecorder:
                     utc_round_trip(time),
                     str(point.index),
                     point.mode.name,
-                    fixed(point.setpoint_c, 3),
-                    fixed(elapsed, 1),
+                    number(point.setpoint_c),
+                    number(elapsed),
                     "Event",
                     "",
                     "",
-                    name,
+                    clean(name),
                 ]
             )
         )
@@ -263,8 +287,11 @@ def _parse_reason(text: str) -> Any:
     raise ValueError(f"Requested value '{text}' was not found.")
 
 
-def replay(csv_path: str, options: AnalysisOptions) -> list[PointResult]:
-    """Re-runs the analysis over a saved readings.csv, exactly as it ran live."""
+def replay(csv_path: str, options: AnalysisOptions, plan: list[TestPoint] | None = None) -> list[PointResult]:
+    """Re-runs the analysis over a saved readings.csv, exactly as it ran live.
+
+    ``plan``: the run's plan, when its session.json has one: a setpoint then takes the plan's exact value rather
+    than readings.csv's, which older recordings rounded to three decimals."""
     results: list[PointResult] = []
     state: dict[str, Any] = {"analyzer": None, "point": None}
     after_reset = False  # the setpoint being replayed came after a break
@@ -300,6 +327,10 @@ def replay(csv_path: str, options: AnalysisOptions) -> list[PointResult]:
             continue
         mode = _parse_mode(f[2])
         sp = _parse_float(f[3])
+        if plan is not None:
+            planned = next((p for p in plan if p.index == index), None)
+            if planned is not None and abs(planned.setpoint_c - sp) < 0.001:
+                sp = planned.setpoint_c
         elapsed = _try_float(f[4])
         if elapsed is None:
             elapsed = 0.0
@@ -321,13 +352,10 @@ def replay(csv_path: str, options: AnalysisOptions) -> list[PointResult]:
                 if state["analyzer"] is not None:
                     state["analyzer"].mark_preheat_signal()
             elif ev.startswith("end:") and state["analyzer"] is not None:
-                reason = _parse_reason(ev[4:])
-                # Converged and TimedOut come back by themselves; the others were the user's choice.
-                close(
-                    CompletionReason.Manual
-                    if reason in (CompletionReason.Converged, CompletionReason.TimedOut)
-                    else reason
-                )
+                # Why the measuring stopped, as recorded. If this analysis (with other options, say) hadn't finished
+                # by itself by then, the recorded reason still says why the readings end here; met_precision says
+                # whether this analysis's target was met.
+                close(_parse_reason(ev[4:]))
             continue
 
         analyzer = state["analyzer"]

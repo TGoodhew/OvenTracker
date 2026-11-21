@@ -159,7 +159,8 @@ class ChangePrompt:
         reminded = 0
         choice: T | None = None
         token = self._token
-        self._recorder.note(started, f"prompt:{note}")
+        # The notes take the recorder's clock (a simulation's own); the waiting is timed on the PC's.
+        self._recorder.note(self._recorder.now, f"prompt:{note}")
         console = ui.get()
 
         def since() -> float:
@@ -209,5 +210,5 @@ class ChangePrompt:
                         live.update(render(), refresh=True)
                         token.wait(0.25)
                     live.update(render(), refresh=True)
-        self._recorder.note(datetime.now(timezone.utc), f"answered:{_answer(choice)}:{fixed(since(), 0)}s")
+        self._recorder.note(self._recorder.now, f"answered:{_answer(choice)}:{fixed(since(), 0)}s")
         return choice

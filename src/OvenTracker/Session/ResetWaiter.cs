@@ -48,7 +48,7 @@ public sealed class ResetWaiter(MeterPoller poller, RunRecorder recorder, UnitFo
         var model = new CoolingModel(ambientC);
         var cold = new ResetTarget("Start again from cold", ambientC + Margin);
         DateTimeOffset? start = null;
-        DateTimeOffset now = DateTimeOffset.UtcNow;
+        DateTimeOffset now = recorder.Now; // then each reading's time
         var ready = false;
         var outcome = ResetOutcome.Ready;
         var canReadKeys = !Console.IsInputRedirected;

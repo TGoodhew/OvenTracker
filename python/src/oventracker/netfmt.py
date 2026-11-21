@@ -30,6 +30,7 @@ __all__ = [
     "net_ceiling",
     "clamp",
     "json_number",
+    "round_trip",
     "json_string",
 ]
 
@@ -151,6 +152,16 @@ def json_number(x: float | int) -> str:
     if point >= len(digits):
         return sign + digits + "0" * (point - len(digits))
     return f"{sign}{digits[:point]}.{digits[point:]}"
+
+
+def round_trip(x: float) -> str:
+    """``x.ToString("R", InvariantCulture)``: the shortest digits that read back as the same double. .NET 11 writes
+    these exactly as System.Text.Json does (``2``, ``1E-05``, ``1E+17``), and NaN and the infinities by name."""
+    if math.isnan(x):
+        return "NaN"
+    if math.isinf(x):
+        return "Infinity" if x > 0 else "-Infinity"
+    return json_number(float(x))
 
 
 _SHORT = {"\b": "\\b", "\f": "\\f", "\n": "\\n", "\r": "\\r", "\t": "\\t", "\\": "\\\\"}

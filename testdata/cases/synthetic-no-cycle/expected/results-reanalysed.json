@@ -46,7 +46,7 @@
         "setpointC": 176.66666666666666
       },
       "metrics": {
-        "setpointC": 176.667,
+        "setpointC": 176.66666666666666,
         "reason": "Converged",
         "kind": "Block",
         "units": 5,
@@ -65,7 +65,7 @@
         "totalMinutes": 58.5,
         "precisionTargetC": 1.1111111111111112,
         "longestGapSeconds": 1,
-        "offsetC": 2.370500000000021,
+        "offsetC": 2.3708333333333655,
         "metPrecision": true
       },
       "afterReset": false,

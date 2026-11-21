@@ -1,0 +1,4 @@
+# the worst setpoint's error made smallest
+runs/sim-bake-c
+--objective
+minimax

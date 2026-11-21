@@ -46,10 +46,10 @@ time_utc,point,mode,setpoint_c,elapsed_s,status,temp_c,raw,event
 | 0 | `time_utc` | timestamp | .NET round-trip format `O` of a UTC time: `yyyy-MM-ddTHH:mm:ss.fffffffZ`, always seven fractional digits, e.g. `2026-11-20T19:18:08.6977161Z` | When the reading was taken, or when the event happened. See [Timestamps](#timestamps). |
 | 1 | `point` | integer | invariant culture | The setpoint's `index` in the plan (from 1), or `0` for anything outside a setpoint. |
 | 2 | `mode` | enum | `Bake` or `Convection` | The setpoint's mode. Empty when `point` is 0. |
-| 3 | `setpoint_c` | number, °C | `F3` (three decimals), e.g. `176.667` | The setpoint. Empty when `point` is 0. |
-| 4 | `elapsed_s` | number, s | `F1` (one decimal), e.g. `118.1` | Seconds since the setpoint's first reading (after a `start` or `restart`). Empty when `point` is 0. |
+| 3 | `setpoint_c` | number, °C | round-trip `R`, e.g. `176.66666666666666` (older recordings: `F3`, `176.667`) | The setpoint. Empty when `point` is 0. |
+| 4 | `elapsed_s` | number, s | round-trip `R`, e.g. `118.0815` (older: `F1`, `118.1`) | Seconds since the setpoint's first reading (after a `start` or `restart`). Empty when `point` is 0. |
 | 5 | `status` | enum | see below | The reading's status, or `Event`. |
-| 6 | `temp_c` | number, °C | `F2` (two decimals), e.g. `180.87` | The reading in °C. Only when `status` is `Ok`; empty otherwise. |
+| 6 | `temp_c` | number, °C | round-trip `R`, e.g. `180.873` (older: `F2`, `180.87`) | The reading in °C. Only when `status` is `Ok`; empty otherwise. |
 | 7 | `raw` | text | see below | What the meter sent. Empty for events. |
 | 8 | `event` | text | see below | The event's name. Empty for readings. |
 
@@ -70,9 +70,9 @@ Only `Ok` rows inside a setpoint are used by the analysis.
 
 ### raw
 
-The meter's reply exactly as received, after the driver has trimmed the line ending, with two changes so it
-can't break the CSV: every `,` becomes `;`, and every `"` is removed. Nothing else is escaped (as
-implemented: a CR or LF in the middle of a reply would break the line; the drivers trim only the ends).
+The meter's reply exactly as received, after the driver has trimmed the line ending, cleaned so it can't break
+the CSV (`RunRecorder.Clean`): every `,` becomes `;`, every `"` and CR is removed, and every LF becomes a
+space. Nothing else is escaped.
 Examples: `+1.80873000E+02` (U1253B), `22.1` (the simulator, which writes its °C value with `F1`),
 `TEMP:K CEL` (a U1253B reply that wasn't a number). For a 34401A that isn't set to measure resistance, it is
 the meter's configuration description. A reader should treat it as opaque.
@@ -125,18 +125,19 @@ Session events (`point` 0):
 | `prompt:<text>` | A prompt was shown, e.g. `prompt:SET THE OVEN TO BAKE 350 °F`. | Nothing. |
 | `answered:<choice>:<n>s` | The prompt was answered after *n* whole seconds. `<choice>` is `Start`, `Skip`, `Finish` or `Wait` for the change prompt, `True` or `False` for the adjustment prompt, `True` for the turn-off prompt. | Nothing. |
 
-A reader must ignore events it doesn't know. The `prompt:` text isn't sanitised (as implemented): a heading
-such as `PRESS W TO LET IT COOL, OR SET IT TO` puts a comma in the event, so that row has ten fields. Replay
-reads only the first nine.
+A reader must ignore events it doesn't know. Event names are cleaned like `raw`, so a `prompt:` heading such
+as `PRESS W TO LET IT COOL, OR SET IT TO` is written `PRESS W TO LET IT COOL; OR SET IT TO`, and every row has
+nine fields. Older recordings didn't clean them, so a reader should read only the first nine fields.
 
 ### Timestamps
 
 `time_utc` is for people and isn't used by the analysis, which uses `elapsed_s` alone. Readings carry the
-meter reading's own time. In the simulator that is the simulated clock, which runs faster than real time
-with `--speed`. Session events from `resume`, `reset`, `started-warm`, `adjustment-changed`, `prompt:` and
-`answered:` carry the PC's clock instead (`reset-start` and `reset-end:` carry the last reading's time, or
-the PC's clock before any). So `time_utc` need not increase down the file; in `sim-characterise` the
-`adjustment-changed` row is two hours earlier than the rows around it.
+meter reading's own time. Session events carry the recorder's clock: the PC's, or for a simulation (whose
+readings carry a simulated clock that runs faster than real time with `--speed`) the time of the latest
+reading. So `time_utc` increases down the file within a sitting. A resumed simulation starts its simulated
+clock again from the PC's, so its new sitting can begin earlier than the last one ended. Older simulated
+recordings, such as `sim-characterise`, have session events on the PC's clock, out of order with the
+readings.
 
 ### A resumed run
 
@@ -149,7 +150,17 @@ the adjustment, adjustment options, oven, ambient temperature and sensor as give
 
 ### Example
 
-From `testdata/runs/real-2026-11-20-1118`, with lines left out at `…`:
+A recording in the current format (a simulated run: the simulator writes its °C value with `F1` as `raw`):
+
+```
+time_utc,point,mode,setpoint_c,elapsed_s,status,temp_c,raw,event
+2026-11-21T03:01:37.6206799Z,1,Bake,176.66666666666666,0,Event,,,start
+2026-11-21T03:01:37.6206799Z,1,Bake,176.66666666666666,0,Ok,203.2,203.2,
+2026-11-21T03:01:38.6206799Z,1,Bake,176.66666666666666,1,Ok,203.2,203.2,
+```
+
+An older recording, with fixed decimals, from `testdata/runs/real-2026-11-20-1118` (a real U1253B), with lines
+left out at `…`:
 
 ```
 time_utc,point,mode,setpoint_c,elapsed_s,status,temp_c,raw,event
@@ -325,10 +336,10 @@ One JSON object, with the same serialisation rules as `session.json`:
 
 Both are always present. `results` may be empty.
 
-The order of `results`: from `run`, by `point.index`. From `analyze` of one run, in the order the setpoints
-closed in `readings.csv` (as implemented: not sorted, so a setpoint measured again in a later sitting comes
-after those it followed). From `analyze` of several runs, by run (oldest first), then as above, with the
-indexes renumbered 1, 2, 3….
+The order of `results`: by `point.index`, from `run` and from `analyze` of one run. From `analyze` of several
+runs, by run (oldest first), then by index within each, with the indexes renumbered 1, 2, 3…. A resumed run's
+results include the earlier sittings' setpoints that weren't finished (interrupted or skipped) until they're
+measured again, as `analyze` shows them.
 
 A setpoint is in `results` once it has started (a `start` event); setpoints never started are not. A
 setpoint skipped at the prompt never starts. In a live run that was resumed, setpoints that ended `Aborted`
@@ -351,7 +362,7 @@ Times in minutes are from the setpoint's first reading (after its last `restart`
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
-| `setpointC` | number, °C | yes | The setpoint the analysis used. From `analyze`, the value in `readings.csv` (three decimals, as implemented), so it can differ from `point.setpointC` in the fourth decimal. |
+| `setpointC` | number, °C | yes | The setpoint the analysis used: the plan's, the same as `point.setpointC`. |
 | `reason` | `None` \| `Converged` \| `TimedOut` \| `Manual` \| `Aborted` \| `Skipped` | yes | Why the setpoint ended. |
 | `kind` | `Cycle` \| `Block` | no | What the steady state was cut into. Absent if measuring never began. |
 | `units` | integer | yes | Cycles or blocks the result is based on. |

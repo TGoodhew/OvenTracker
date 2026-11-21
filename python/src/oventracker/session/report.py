@@ -15,7 +15,7 @@ from ..analysis.adjustment_advisor import (
     AdjustPoint,
     advise,
 )
-from ..analysis.session_summary import PointResult, Verdict, by_mode, compare, judge
+from ..analysis.session_summary import PointResult, Verdict, by_mode, compare, judge, judge_offset
 from ..analysis.setpoint_analyzer import CompletionReason, PointMetrics, UnitKind
 from ..jsonio import NEWLINE
 from ..netfmt import custom, fixed, round_even
@@ -297,8 +297,9 @@ class Report:
         tol = self.info.tolerance_c
         rows = []
         for r in a.residuals:
-            hw = r.half_width_c if r.half_width_c is not None else 0.0
-            ok = "Yes" if abs(r.after_c) + hw <= tol else "No" if abs(r.after_c) - hw > tol else "Borderline"
+            # The same judgement as the verdicts: without a ±95 %, an error within tolerance is only Borderline.
+            v = judge_offset(r.after_c, r.half_width_c, tol)
+            ok = "Yes" if v == Verdict.Accurate else "No" if v == Verdict.OutOfTolerance else "Borderline"
             rows.append(
                 [
                     mode_name(r.mode),
@@ -321,7 +322,8 @@ class Report:
     def durations(self) -> Iterator[str]:
         """What the tracking time came to, and what to allow next time."""
         f = self.f
-        done = [r for r in self.results if r.metrics.reason == CompletionReason.Converged]
+        # The setpoints that settled and met this analysis's precision (as Report.Durations).
+        done = [r for r in self.results if r.metrics.reason == CompletionReason.Converged and r.metrics.met_precision]
         if not done:
             return
         first = done[0]
@@ -376,7 +378,8 @@ class Report:
         sb.line()
         _table(sb, POINT_COLUMNS, (cells for _, _, cells in self.point_rows()))
         sb.line()
-        sb.line(
+        # One paragraph: the notes on started-warm and after-reset setpoints follow on the same line.
+        sb.append(
             "*Measured* is the time-weighted mean over whole thermostat cycles once the oven had settled; *±95 %* is how sure that mean is. "
             "*Swing* is the average peak-to-peak of a cycle and *Range* the lowest and highest readings while measuring. "
             "*To temp* is from pressing Start to first reaching the setting (or the thermostat first turning round, for an oven that runs cold); "

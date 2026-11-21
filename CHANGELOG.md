@@ -6,6 +6,27 @@ port doesn't cover it, or a `parity` issue is open), or **Python**.
 
 ## Unreleased
 
+- Consistency fixes in the analysis and recording (#36). Has: **both**.
+  - **Recording:**
+    - `readings.csv` keeps full precision, so re-analysing a run gives exactly its live results.
+    - Event names are cleaned like `raw`.
+    - A simulation's events are on its own clock, so the file stays in time order.
+  - **Re-analysis:**
+    - It keeps the recorded reason, rather than calling a point "finished early by you".
+    - Results are in order of index.
+    - Combining runs keeps an unknown adjustment unknown.
+    - A recording with no `session.json` gets the °F defaults.
+    - A resumed run keeps the earlier sittings' unfinished points.
+  - **Cycles:** a trough within 20 s of the last now joins the next cycle instead of being lost.
+  - **The recommended adjustment:**
+    - The same test for precision everywhere, and the same notion of "the same setpoint".
+    - The "Within tolerance?" column judges a missing ±95 % as the verdict does.
+    - A measured gain whose points lack a ±95 % has an unknown uncertainty.
+    - Without the current adjustment, the search no longer assumes it's 0.
+    - `--favour` with a shared adjustment weighs each mode once, with its own gain.
+    - `--favour` and `--objective` can't be given together.
+    - Each mode's reason for more setpoints is kept.
+
 - The whole app in Python, drawn with Rich: `run`, `characterise`, `analyze`, `ovens` and `meters`, with the
   U1253B and the simulator. It has the same screens as the C# app, checked against the C# app's own rendering,
   and the same recording files. Has: **Python** (the 34401A and 121GW drivers: **C#** only, #38 and #39).

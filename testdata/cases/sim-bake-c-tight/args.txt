@@ -1,0 +1,4 @@
+# a tighter precision than the run reached: the recorded reason stays, and metPrecision says it wasn't met
+runs/sim-bake-c
+--precision
+0.05

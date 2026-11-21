@@ -573,13 +573,19 @@ def _execute(s: RunSettings, token: CancellationToken) -> int:
     if resumed is None and isinstance(s, CharacteriseSettings):
         plan = [replace(p, adjustment_c=adjustment_c if adjustment_c is not None else 0.0) for p in plan]
 
-    # What's already done, when resuming: the setpoints that finished (by themselves or by choice).
-    done: list[PointResult] = []
+    # When resuming, everything the earlier sittings measured, with the plan's adjustment for each. The setpoints
+    # that finished (by themselves or by choice) are done; the others (interrupted or skipped) are measured again,
+    # and until they are, their earlier result stays in the results, as analyze shows it.
+    earlier: list[PointResult] = []
     if resumed is not None:
-        for r in replay(resumed.csv, options):
-            if r.metrics.reason in (CompletionReason.Converged, CompletionReason.TimedOut, CompletionReason.Manual):
-                planned = next((p for p in plan if p.index == r.point.index), None)
-                done.append(replace(r, point=planned if planned is not None else r.point))
+        for r in replay(resumed.csv, options, plan):
+            planned = next((p for p in plan if p.index == r.point.index), None)
+            earlier.append(replace(r, point=planned if planned is not None else r.point))
+    done = [
+        r
+        for r in earlier
+        if r.metrics.reason in (CompletionReason.Converged, CompletionReason.TimedOut, CompletionReason.Manual)
+    ]
     todo = [p for p in plan if all(d.point.index != p.index for d in done)]
     if resumed is not None and not todo and not (resumed.info.characterise is not None and resumed.info.characterise.changed_to_c is None):
         c.print(f"[green]Every setpoint in {ui.escape(resumed.folder)} is already done.[/] [bold]{APP_NAME} analyze[/] re-reads it.")
@@ -703,12 +709,18 @@ def _execute(s: RunSettings, token: CancellationToken) -> int:
         app_settings.save()
 
     recorder = RunRecorder(out_dir, info, append=resumed is not None)
+    # A simulation's readings carry its own, faster clock: its events take the time of the latest reading, so
+    # readings.csv stays in time order.
+    if driver.is_simulation:
+        recorder.clock = lambda: (
+            recorder.last_reading_time if recorder.last_reading_time is not None else datetime.now(timezone.utc)
+        )
     if resumed is not None:
-        recorder.note(datetime.now(timezone.utc), "resume")
+        recorder.note(recorder.now, "resume")
     poller = MeterPoller(meter, s.interval, s.speed if driver.is_simulation else 1, connected=True)
     poller.start()
 
-    results: list[PointResult] = list(done)
+    results: list[PointResult] = list(earlier)
     meter_label = "simulated meter" if driver.is_simulation else f"{identity.model} on {meter.location}"
     tracker = PointTracker(
         poller,
@@ -795,7 +807,7 @@ def _execute(s: RunSettings, token: CancellationToken) -> int:
         st["plan"] = plan_now + phase2
         st["info"] = replace(info_now, plan=st["plan"], adjustment_c=to, characterise=replace(ch, changed_to_c=to, changed_at=_now_offset()))
         recorder.update_session(st["info"])
-        recorder.note(datetime.now(timezone.utc), f"adjustment-changed:{fixed(to, 3)}")
+        recorder.note(recorder.now, f"adjustment-changed:{fixed(to, 3)}")
         todo.extend(phase2)
         st["previous"] = None
         st["last_done"] = f"The adjustment is {to_text} now. Phase 2: {len(phase2)} setpoints."
@@ -868,12 +880,12 @@ def _execute(s: RunSettings, token: CancellationToken) -> int:
                         oven.set_oven(point.mode, point.setpoint_c)
                     idle = _drain_idle(poller, recorder)
                     if st["after_reset"]:
-                        recorder.note(datetime.now(timezone.utc), "reset")
+                        recorder.note(recorder.now, "reset")
                     # The first setpoint of a new session, started without letting a warm oven cool. Judged by the
                     # oven when it was asked, not now: by now it may be heating for this setpoint.
                     started_warm = resumed is None and not st["after_reset"] and point.index == plan_now[0].index and hot_at_prompt
                     if started_warm:
-                        recorder.note(datetime.now(timezone.utc), "started-warm")
+                        recorder.note(recorder.now, "started-warm")
                     # Where the oven starts from: the setpoint just measured, if it went straight on from it, or its last two minutes.
                     previous = st["previous"]
                     frm = previous.metrics.mean_c if previous is not None and previous.metrics.mean_c is not None else starting_from(idle, poller.last_celsius)

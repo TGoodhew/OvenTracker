@@ -15,7 +15,6 @@ Run 2026-01-10 10:00 with synthetic on none. A setpoint is accurate when its mea
 
 *Measured* is the time-weighted mean over whole thermostat cycles once the oven had settled; *±95 %* is how sure that mean is. *Swing* is the average peak-to-peak of a cycle and *Range* the lowest and highest readings while measuring. *To temp* is from pressing Start to first reaching the setting (or the thermostat first turning round, for an oven that runs cold); *First peak* is the first high point against the setting, which is the overshoot when it is positive.
 
-
 ## Best adjustment
 
 **Bake: set the oven's thermostat adjustment to −4 °F (it's 0 °F now).**

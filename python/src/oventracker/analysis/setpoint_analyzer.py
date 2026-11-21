@@ -168,7 +168,7 @@ class PointMetrics:
     @property
     def met_precision(self) -> bool:
         hw = self.half_width_c
-        return hw is not None and hw <= self.precision_target_c + 1e-9
+        return hw is not None and within_precision(hw, self.precision_target_c)
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -198,6 +198,16 @@ class PointMetrics:
             "offsetC": self.offset_c,
             "metPrecision": self.met_precision,
         }
+
+
+MIN_UNIT_SECONDS = 20.0
+"""The shortest a unit can be: a reversal quicker than this is a disturbance, not a cycle."""
+
+
+def within_precision(half_width_c: float, target_c: float) -> bool:
+    """Whether a half-width meets the precision target: the stopping rule and PointMetrics.met_precision use the
+    same test."""
+    return half_width_c <= target_c + 1e-9
 
 
 def _sign(x: float) -> int:
@@ -310,8 +320,9 @@ class SetpointAnalyzer:
             return
 
         if self.phase == PointPhase.Measuring:
-            self._close_unit(UnitKind.Cycle, self._unit_start, tp.t)
-            self._unit_start = tp.t
+            # A trough too soon after the last is a disturbance, not a cycle: the cycle carries on to the next one.
+            if self._close_unit(UnitKind.Cycle, self._unit_start, tp.t):
+                self._unit_start = tp.t
         elif self.phase == PointPhase.Settling and len(self.turning_points) >= 2:
             self.phase = PointPhase.Measuring
             self.kind = UnitKind.Cycle
@@ -357,19 +368,21 @@ class SetpointAnalyzer:
             self.measuring_start = t
         self._unit_start = t
 
-    def _close_unit(self, kind: UnitKind, t0: float, t1: float) -> None:
-        if t1 - t0 < 20:
-            return  # a reversal this quick is a disturbance, not a cycle
+    def _close_unit(self, kind: UnitKind, t0: float, t1: float) -> bool:
+        """False if the stretch is too short to be a unit, so it stays part of the next one."""
+        if t1 - t0 < MIN_UNIT_SECONDS:
+            return False
         mn, mx = self.series.range(t0, t1)
         self.units.append(MeasurementUnit(kind, t0, t1, self.series.mean(t0, t1), mn, mx))
         if kind == UnitKind.Cycle:
             self._cycle_durations.append(t1 - t0)
         self._evaluate()
+        return True
 
     def _evaluate(self) -> None:
         self._drop_warm_up_units()
         e = self.current_estimate
-        if e is not None and e.half_width_c is not None and e.n >= self.min_units and e.half_width_c <= self.options.precision_c:
+        if e is not None and e.half_width_c is not None and e.n >= self.min_units and within_precision(e.half_width_c, self.options.precision_c):
             self._complete(CompletionReason.Converged)
 
     def _drop_warm_up_units(self) -> None:

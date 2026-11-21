@@ -74,27 +74,54 @@ public sealed class RunRecorder : IDisposable
     /// next setpoint follows a wait for the oven to cool), "reset-start" and "reset-end".
     /// </summary>
     public void Note(DateTimeOffset time, string name) =>
-        csv.WriteLine(string.Join(',', time.UtcDateTime.ToString("O", Inv), "0", "", "", "", "Event", "", "", name));
+        csv.WriteLine(string.Join(',', time.UtcDateTime.ToString("O", Inv), "0", "", "", "", "Event", "", "", Clean(name)));
+
+    /// <summary>
+    /// Text for a CSV field: commas become semicolons, and quotes and line breaks are dropped, so every row keeps
+    /// its nine fields. Used for <c>raw</c> and for event names (a <c>prompt:</c> event carries the prompt's words).
+    /// </summary>
+    public static string Clean(string text) =>
+        text.Replace(",", ";").Replace("\"", "").Replace("\r", "").Replace("\n", " ");
+
+    /// <summary>
+    /// A number as written to readings.csv: the shortest text that reads back as exactly the same double ("R"), so
+    /// re-analysing a recording gives exactly what the live run did.
+    /// </summary>
+    public static string Number(double v) => v.ToString("R", Inv);
 
     public string Directory { get; }
     public string CsvPath => Path.Combine(Directory, "readings.csv");
 
-    public void Reading(MeterReading r, TestPoint? point, double? elapsed) =>
+    /// <summary>
+    /// The time for an event: the PC's clock, or for a simulation the simulated clock (set <see cref="Clock"/>), so
+    /// events and readings in readings.csv are on the same clock and in order.
+    /// </summary>
+    public DateTimeOffset Now => Clock?.Invoke() ?? DateTimeOffset.UtcNow;
+
+    public Func<DateTimeOffset>? Clock { get; set; }
+
+    /// <summary>The time of the last reading written.</summary>
+    public DateTimeOffset? LastReadingTime { get; private set; }
+
+    public void Reading(MeterReading r, TestPoint? point, double? elapsed)
+    {
+        LastReadingTime = r.Time;
         csv.WriteLine(string.Join(',',
             r.Time.UtcDateTime.ToString("O", Inv),
             point?.Index.ToString(Inv) ?? "0",
             point?.Mode.ToString() ?? "",
-            point is null ? "" : point.SetpointC.ToString("F3", Inv),
-            elapsed?.ToString("F1", Inv) ?? "",
+            point is null ? "" : Number(point.SetpointC),
+            elapsed is { } e ? Number(e) : "",
             r.Status.ToString(),
-            r.Celsius?.ToString("F2", Inv) ?? "",
-            r.Raw.Replace(",", ";").Replace("\"", ""),
+            r.Celsius is { } c ? Number(c) : "",
+            Clean(r.Raw),
             ""));
+    }
 
     public void Event(DateTimeOffset time, TestPoint point, double elapsed, string name) =>
         csv.WriteLine(string.Join(',',
             time.UtcDateTime.ToString("O", Inv), point.Index.ToString(Inv), point.Mode.ToString(),
-            point.SetpointC.ToString("F3", Inv), elapsed.ToString("F1", Inv), "Event", "", "", name));
+            Number(point.SetpointC), Number(elapsed), "Event", "", "", Clean(name)));
 
     /// <summary>Rewrites session.json, e.g. when characterise adds its second phase to the plan.</summary>
     public void UpdateSession(SessionInfo info) =>
@@ -118,7 +145,11 @@ public static class Replay
 {
     static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
 
-    public static IReadOnlyList<PointResult> Analyze(string csvPath, AnalysisOptions options)
+    /// <param name="plan">
+    /// The run's plan, when its session.json has one: a setpoint then takes the plan's exact value rather than
+    /// readings.csv's, which older recordings rounded to three decimals.
+    /// </param>
+    public static IReadOnlyList<PointResult> Analyze(string csvPath, AnalysisOptions options, IReadOnlyList<TestPoint>? plan = null)
     {
         var results = new List<PointResult>();
         SetpointAnalyzer? analyzer = null;
@@ -147,7 +178,8 @@ public static class Replay
                 continue;
             }
             var mode = Enum.Parse<OvenMode>(f[2]);
-            var sp = double.Parse(f[3], Inv);
+            var sp = double.Parse(f[3], NumberStyles.Float, Inv);
+            if (plan?.FirstOrDefault(p => p.Index == index) is { } planned && Math.Abs(planned.SetpointC - sp) < 0.001) sp = planned.SetpointC;
             double.TryParse(f[4], NumberStyles.Float, Inv, out var elapsed);
 
             if (f[5] == "Event")
@@ -171,9 +203,10 @@ public static class Replay
                 else if (ev == "preheat-signal") analyzer?.MarkPreheatSignal();
                 else if (ev.StartsWith("end:", StringComparison.Ordinal) && analyzer is not null)
                 {
-                    var reason = Enum.Parse<CompletionReason>(ev[4..]);
-                    // Converged and TimedOut come back by themselves; the others were the user's choice.
-                    Close(reason is CompletionReason.Converged or CompletionReason.TimedOut ? CompletionReason.Manual : reason);
+                    // Why the measuring stopped, as recorded. If this analysis (with other options, say) hadn't finished by
+                    // itself by then, the recorded reason still says why the readings end here; PointMetrics.MetPrecision
+                    // says whether this analysis's target was met.
+                    Close(Enum.Parse<CompletionReason>(ev[4..]));
                 }
                 continue;
             }

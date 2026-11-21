@@ -32,8 +32,13 @@ testdata/
 | `synthetic-manual-finish` | `sim-bake-c` cut 60 % of the way through its first setpoint, finished by hand (`end:Manual`). |
 | `py-sim-bake-convection-f` | Recorded by the **Python** app's simulator, °F, bake and convection, so the C# app is checked on the Python app's recordings too. |
 
-The cases replay each run alone. Some also change options (`--precision`, `--tolerance`, `--probe`,
-`--favour`), and `combined` analyses two runs together.
+The cases replay each run alone. Some also change options:
+- `--precision`, `--tolerance` and `--probe`;
+- `--objective minimax`;
+- `--favour`, for one mode, and for bake and convection on one shared adjustment;
+- a `--precision` tighter than the run reached, so the recorded reason is kept and `metPrecision` is false.
+
+`combined` analyses two runs together.
 
 The simulators' random numbers differ between implementations, so the cases use recorded files, never a live
 simulation.
