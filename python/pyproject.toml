@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "oventracker"
 # The release workflow rewrites this line with the release version (the C# app's <Version>).
 version = "1.0.0"
-description = "OvenTracker's analysis in Python: re-analyse a recorded oven run and write the same report and results as the C# app."
+description = "OvenTracker in Python: measure an oven's temperature accuracy with a meter (or the simulator), and analyse the runs, as the C# app does."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
@@ -16,7 +16,9 @@ classifiers = [
     "Operating System :: OS Independent",
     "Topic :: Scientific/Engineering",
 ]
-dependencies = []
+# rich draws the console; pyserial is imported only when a serial meter (the U1253B) is used, so the simulator
+# runs without it. The analysis itself needs only the standard library.
+dependencies = ["rich>=13", "pyserial>=3.5"]
 
 [project.optional-dependencies]
 test = ["pytest"]

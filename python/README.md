@@ -1,60 +1,68 @@
-# OvenTracker for Python (the analysis)
+# OvenTracker for Python
 
-A Python port of OvenTracker's analysis. `oventracker-py analyze` reads a run that the OvenTracker app recorded
-(`readings.csv` and `session.json`) and writes the same report and results as the app's own `analyze`: the
-Markdown report, the results JSON and, for a characterise run, the characterisation.
+OvenTracker in Python. It measures how accurately an oven holds its setpoints, works out what to set its
+thermostat adjustment to, and re-analyses saved runs. It's the same app as the C# one in this repository, with
+the same commands, options, screens and files, drawn with [Rich](https://github.com/Textualize/rich) instead of
+Spectre.Console. It runs on Python 3.11 or later, on Windows, Linux and macOS.
 
-It has no dependencies beyond the Python standard library, and runs on Python 3.11 or later.
+| Command | What it does |
+| --- | --- |
+| `oventracker-py run` (the default) | Measure the oven at each setpoint, in bake and convection, with the live display. |
+| `oventracker-py characterise` | Measure how the oven's adjustment moves it, and save the gains to its profile. |
+| `oventracker-py analyze <runs…>` | Re-run the analysis over saved runs, alone or together. |
+| `oventracker-py ovens` | List the oven profiles, or show one (`--show ge-phs925`). |
+| `oventracker-py meters` | List the meters each driver can see (`--probe` asks them). |
 
-The C# app is the reference implementation. This package follows it, and the shared test data in `testdata/`
-checks that the two agree (see `spec/`, in particular `spec/testdata.md`). Measuring an oven (`run`,
-`characterise`), the meters and the live display are only in the C# app.
+The meters:
+- **Keysight U1253B:** through a U1177A Bluetooth adapter or a U1173 cable, on a serial port (through pyserial).
+- **The simulator:** `--simulate`.
+- **Not here yet:** the C# app's other drivers, the HP 34401A and the EEVblog 121GW (issues #38 and #39).
+  `--meter 34401a` and `--meter 121gw` say so.
 
 ## Install
 
 From a clone of the repository:
 
 ```
-pip install ./python
+pip install ./python          # or, to keep it apart from other packages: pipx install ./python
 ```
 
-or, to keep it apart from other packages:
+It needs `rich` and `pyserial`, which pip installs. On Linux the U1177A pairs and binds as for the C# app; see
+the main README's Linux section.
+
+## Try it without a meter
 
 ```
-pipx install ./python
+oventracker-py run --simulate --speed 600
+oventracker-py run --simulate --speed 600 --sim-hot 450 --unit F --modes bake,convection --setpoints 350,400
+oventracker-py characterise --simulate -y --speed 600 --unit F --modes bake --setpoints 325,425
 ```
 
-## Use
+- The first asks for the unit, modes and setpoints, then runs a simulated oven 600 times faster than real time.
+- The second starts with the oven still hot, so the change prompt offers to wait for it to cool.
+- `python -m oventracker …` does the same as `oventracker-py …`. To run it from a clone without installing it
+  (on Linux or WSL, with Rich installed):
 
-```
-oventracker-py analyze <FOLDERS...> [options] [--out DIR]
-```
+  ```
+  PYTHONPATH=python/src python3 -m oventracker run --simulate --speed 600
+  ```
 
-`python -m oventracker analyze ...` does the same. The options are the C# app's, with the same meanings:
+## How it relates to the C# app
 
-| Option | What it does |
-| --- | --- |
-| `--precision <DEG>` | Re-run with a different precision target, in the oven's unit. |
-| `--tolerance <DEG>` | Judge against a different tolerance, in the oven's unit. |
-| `--min-cycles <N>` | Fewest full thermostat cycles a result is based on. |
-| `-o`, `--out <DIR>` | Folder for the report and results. Default: the (latest) run's own folder. |
-| `--oven <KEY>` | The oven: `generic`, `ge-phs925`, or one described in a file in `Documents/OvenTracker/ovens`. |
-| `--probe <NAME>` | The probe: `type-k`, `type-k-special` or `80bk-a`. |
-| `--probe-tolerance <SPEC>`, `--probe-max <TEMP>` | A probe's tolerance (e.g. `2.2C,2%`) and rated maximum (e.g. `260C`). |
-| `--adjustment <DEG>` | The oven's thermostat adjustment during the run. |
-| `--objective <AIM>`, `--favour <TEMP>` | What the recommended adjustment makes smallest (`balanced` or `minimax`), or a temperature to make right. |
-| `--adjust-step`, `--adjust-range`, `--adjust-model`, `--separate-adjustments` | How the oven's adjustment works. |
-| `--save-gains` | Accepted, but not supported yet: use the C# app to save gains to an oven's profile. |
+The C# app is the reference implementation; this package follows it. The two are kept aligned by the
+specification in `spec/` and the shared test data in `testdata/`:
+- each implementation replays every recording there;
+- CI checks that the two give the same files;
+- `testdata/` includes runs recorded by each app, so each analyses the other's.
 
-One run writes `report-reanalysed.md` and `results-reanalysed.json`; several runs together write
-`report-combined.md` and `results-combined.json`. A characterise run also writes `characterisation.md` and
-`characterisation.json`. For example:
+The two are interchangeable in practice:
+- a run recorded by either reads the same in both;
+- they share the settings file (`settings.json`) and the oven profiles (`Documents/OvenTracker/ovens`).
 
-```
-oventracker-py analyze testdata/runs/sim-bake-c --out out
-```
-
-The report's times are shown in the computer's own time zone, as the app shows them.
+A few things differ on purpose:
+- The help and hints say `oventracker-py`.
+- An unknown option is an error. The C# app ignores it.
+- The simulator's random numbers differ.
 
 ## Tests
 
@@ -63,5 +71,10 @@ pip install "./python[test]"
 python -m pytest python/tests -q
 ```
 
-The tests replay every case in `testdata/cases` and compare the output with the C# app's, using
-`testdata/tools/compare.py`.
+The tests cover:
+- **the shared test data;**
+- **the engine:** a whole simulated session with no terminal, which must write all four files with no cursor
+  codes;
+- **the screens;**
+- **the C# app, where .NET is installed:** the console report compared with the C# app's, and the C# app's
+  `analyze` of a Python-recorded run.

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 from .. import jsonio
+from ..netfmt import fixed
 from ..analysis.adjustment_advisor import AdjustmentOptions
 from ..analysis.characterisation import CharacteriseInfo
 from ..analysis.session_summary import PointResult, TestPoint
@@ -110,6 +113,104 @@ class SessionInfo:
 def results_json(info: SessionInfo, results: list[PointResult]) -> str:
     """results.json: the session and each setpoint's result (spec/results.schema.json)."""
     return jsonio.dumps({"session": info, "results": results})
+
+
+# Recording -----------------------------------------------------------------------------------------
+
+
+def utc_round_trip(time: datetime) -> str:
+    """``time.UtcDateTime.ToString("O")``: yyyy-MM-ddTHH:mm:ss.fffffffZ, always seven fractional digits."""
+    if time.tzinfo is not None:
+        time = time.astimezone(timezone.utc)
+    return f"{time:%Y-%m-%dT%H:%M:%S}.{time.microsecond:06d}0Z"
+
+
+def _write_all_text(path: str, text: str) -> None:
+    """File.WriteAllText: UTF-8 without a byte-order mark, the text as it is."""
+    with open(path, "w", encoding="utf-8", newline="") as fh:
+        fh.write(text)
+
+
+class RunRecorder:
+    """Writes every reading to readings.csv as it arrives (flushed each line, so nothing is lost if the PC sleeps
+    or the app is closed), with the events the analysis needs to be replayed (Session/Recording.cs)."""
+
+    def __init__(self, directory: str, info: SessionInfo, append: bool = False):
+        """``append``: carry on a run saved earlier, adding to its readings.csv instead of starting a new one."""
+        self.directory = directory
+        os.makedirs(directory, exist_ok=True)
+        _write_all_text(os.path.join(directory, "session.json"), jsonio.dumps(info))
+        path = self.csv_path
+        fresh = not append or not os.path.isfile(path) or os.path.getsize(path) == 0
+        self._csv = open(path, "w" if fresh else "a", encoding="utf-8", newline="")
+        if fresh:
+            self._line(HEADER)
+
+    @property
+    def csv_path(self) -> str:
+        return os.path.join(self.directory, "readings.csv")
+
+    def _line(self, text: str) -> None:
+        # StreamWriter.WriteLine with AutoFlush: the platform's newline, flushed at once.
+        self._csv.write(text + os.linesep)
+        self._csv.flush()
+
+    def note(self, time: datetime, name: str) -> None:
+        """Something that happened outside any setpoint: "resume", "reset", "reset-start", "reset-end:…", …"""
+        self._line(",".join([utc_round_trip(time), "0", "", "", "", "Event", "", "", name]))
+
+    def reading(self, r: Any, point: TestPoint | None, elapsed: float | None) -> None:
+        """A reading (a meter.base.MeterReading), in a setpoint or (point None) outside one."""
+        self._line(
+            ",".join(
+                [
+                    utc_round_trip(r.time),
+                    str(point.index) if point is not None else "0",
+                    point.mode.name if point is not None else "",
+                    "" if point is None else fixed(point.setpoint_c, 3),
+                    fixed(elapsed, 1) if elapsed is not None else "",
+                    r.status.name,
+                    fixed(r.celsius, 2) if r.celsius is not None else "",
+                    r.raw.replace(",", ";").replace('"', ""),
+                    "",
+                ]
+            )
+        )
+
+    def event(self, time: datetime, point: TestPoint, elapsed: float, name: str) -> None:
+        self._line(
+            ",".join(
+                [
+                    utc_round_trip(time),
+                    str(point.index),
+                    point.mode.name,
+                    fixed(point.setpoint_c, 3),
+                    fixed(elapsed, 1),
+                    "Event",
+                    "",
+                    "",
+                    name,
+                ]
+            )
+        )
+
+    def update_session(self, info: SessionInfo) -> None:
+        """Rewrites session.json, e.g. when characterise adds its second phase to the plan."""
+        _write_all_text(os.path.join(self.directory, "session.json"), jsonio.dumps(info))
+
+    def write_results(self, info: SessionInfo, results: list[PointResult], markdown: str) -> None:
+        _write_all_text(os.path.join(self.directory, "results.json"), results_json(info, results))
+        _write_all_text(os.path.join(self.directory, "report.md"), markdown)
+
+    def close(self) -> None:
+        if not self._csv.closed:
+            self._csv.close()
+
+    def __enter__(self) -> "RunRecorder":
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
 
 
 # Replay --------------------------------------------------------------------------------------------

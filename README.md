@@ -397,17 +397,25 @@ front panel back.
 
 ## The Python package
 
-`python/` holds a second implementation in Python. It covers the **analysis only** for now: it re-analyses
-saved runs and writes the same results and report as `OvenTracker analyze`. Install it with pip on any
-system, with no .NET needed:
+`python/` holds a second implementation of the whole app in Python. It has the same commands (`run`,
+`characterise`, `analyze`, `ovens`, `meters`), options, screens and files, drawn with
+[Rich](https://github.com/Textualize/rich) instead of Spectre.Console. Its meters are the U1253B and the
+simulator so far; the 34401A and the 121GW are issues #38 and #39. Install it with pip on any system, with no
+.NET needed:
 
 ```sh
 pip install ./python                     # or: pipx install ./python
+oventracker-py run --simulate --speed 600
 oventracker-py analyze ~/"Documents/OvenTracker/2026-11-20 1400" --tolerance 10
 ```
 
-Use it to analyse runs on a machine without the app, from your own scripts or notebooks
-(`import oventracker`), or to read the method in Python. To measure an oven, use the app itself.
+Use whichever suits you:
+- `pip`/`pipx` and a Python that's already there (a Raspberry Pi, say);
+- the analysis from your own scripts or notebooks (`import oventracker`);
+- the method to read in Python.
+
+A run recorded by either app reads the same in both, and they share the settings and oven profiles.
+[python/README.md](python/README.md) has more.
 
 The two implementations are kept aligned by a written specification and shared test data, not by reading
 each other's code. The C# app is the reference:

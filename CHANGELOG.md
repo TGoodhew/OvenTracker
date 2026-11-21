@@ -6,6 +6,9 @@ port doesn't cover it, or a `parity` issue is open), or **Python**.
 
 ## Unreleased
 
+- The whole app in Python, drawn with Rich: `run`, `characterise`, `analyze`, `ovens` and `meters`, with the
+  U1253B and the simulator. It has the same screens as the C# app, checked against the C# app's own rendering,
+  and the same recording files. Has: **Python** (the 34401A and 121GW drivers: **C#** only, #38 and #39).
 - Python port of the analysis: `oventracker-py analyze` reads a run's `readings.csv` and `session.json` and
   writes the same `results.json` and report as the C# app. Has: **Python**.
 - `spec/`: the recording formats, with JSON Schemas, and the analysis, written down for both
