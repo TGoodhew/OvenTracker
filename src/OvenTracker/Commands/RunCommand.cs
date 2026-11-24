@@ -84,6 +84,10 @@ public class RunSettings : SharedSettings
     [Description("Carry on a run saved earlier: measure the setpoints it didn't finish, adding to the same folder and report. If the oven is still hot, the app waits for it to cool first.")]
     public string? Resume { get; set; }
 
+    [CommandOption("--redo <LIST>")]
+    [Description("With --resume, measure these setpoints again even though they finished, e.g. 5-8 or 5,7. Give the numbers the run's plan shows. The new attempt replaces the old one in the report. In a characterise run, the app asks for each setpoint's adjustment.")]
+    public string? Redo { get; set; }
+
     [CommandOption("--ambient <TEMP>")]
     [Description("Room temperature, in the oven's unit. Normally the probe's first reading with the oven cold; give it if the oven is hot when you start.")]
     public double? Ambient { get; set; }
@@ -133,6 +137,8 @@ public class RunSettings : SharedSettings
         if (Modes is not null && RunCommand.ParseModes(Modes) is null) return ValidationResult.Error("--modes must be bake, convection, or both.");
         if (Resume is not null && (!Directory.Exists(Resume) || !File.Exists(Path.Combine(Resume, "session.json")) || !File.Exists(Path.Combine(Resume, "readings.csv"))))
             return ValidationResult.Error($"--resume needs a run's folder, with session.json and readings.csv: {Resume}");
+        if (Redo is not null && Resume is null) return ValidationResult.Error("--redo goes with --resume: it measures setpoints of a saved run again.");
+        if (Redo is not null && RunCommand.ParseIndexes(Redo) is null) return ValidationResult.Error("--redo must be setpoint numbers or ranges, e.g. 5-8 or 5,7.");
         if (Setpoints is not null && RunCommand.ParseNumbers(Setpoints) is null) return ValidationResult.Error("--setpoints must be numbers, e.g. 350,400,450.");
         return ValidationResult.Success();
     }
@@ -170,6 +176,49 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
         return list.Count == 0 ? null : list.Distinct().Order().ToList();
     }
 
+    /// <summary>Setpoint numbers and ranges, e.g. <c>5-8</c> or <c>5,7</c> (or both: <c>2,5-8</c>), in order, each once. Null if any part isn't one.</summary>
+    public static IReadOnlyList<int>? ParseIndexes(string text)
+    {
+        var list = new List<int>();
+        foreach (var p in text.Split([',', ' ', ';'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            var ends = p.Split('-');
+            if (ends.Length is < 1 or > 2) return null;
+            if (!int.TryParse(ends[0], NumberStyles.None, Inv, out var from) || from < 1) return null;
+            var to = from;
+            if (ends.Length == 2 && (!int.TryParse(ends[1], NumberStyles.None, Inv, out to) || to < from)) return null;
+            for (var i = from; i <= to; i++) list.Add(i);
+        }
+        return list.Count == 0 ? null : list.Distinct().Order().ToList();
+    }
+
+    /// <summary>
+    /// What a resumed sitting measures, in order: the setpoints that haven't finished, and those in <paramref name="redo"/>
+    /// even though they have. When the setpoints have their own adjustments (a characterise run's two phases), those at an
+    /// adjustment other than the run's are done first, each adjustment's together, so the adjustment is changed as few times
+    /// as it can be and the oven ends at the run's own. Otherwise in plan order.
+    /// </summary>
+    public static List<TestPoint> ResumeOrder(IReadOnlyList<TestPoint> plan, IEnumerable<int> done, IEnumerable<int> redo, double? runAdjustmentC)
+    {
+        var finished = done.ToHashSet();
+        var again = redo.ToHashSet();
+        var todo = plan.Where(p => again.Contains(p.Index) || !finished.Contains(p.Index)).ToList();
+        if (todo.All(p => p.AdjustmentC is null)) return todo;
+        var run = runAdjustmentC ?? 0;
+        double At(TestPoint p) => p.AdjustmentC ?? run;
+        var others = todo.Where(p => !SameAdjustment(At(p), run)).ToList();
+        var groups = new List<List<TestPoint>>();
+        foreach (var p in others)
+        {
+            if (groups.FirstOrDefault(g => SameAdjustment(At(g[0]), At(p))) is { } g) g.Add(p);
+            else groups.Add([p]);
+        }
+        return [.. groups.SelectMany(g => g), .. todo.Where(p => SameAdjustment(At(p), run))];
+    }
+
+    /// <summary>Two adjustments the same, allowing for the rounding of a value read back from session.json or readings.csv.</summary>
+    public static bool SameAdjustment(double a, double b) => Math.Abs(a - b) < 1e-3;
+
     public static IReadOnlyList<TestPoint> BuildPlan(IReadOnlyList<OvenMode> modes, IReadOnlyList<double> setpointsC, bool grouped)
     {
         var order = grouped
@@ -184,6 +233,12 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
         var appSettings = AppSettings.Load();
         // The oven: the one asked for, the saved run's, the one used last time, or the generic one.
         var resumedRun = s.Resume is { } r0 ? AnalyzeCommand.Load(r0) : null;
+        var redo = s.Redo is { } redoText ? ParseIndexes(redoText)! : [];
+        if (resumedRun is not null && redo.Where(i => resumedRun.Info.Plan.All(p => p.Index != i)).ToList() is { Count: > 0 } unknown)
+        {
+            AnsiConsole.MarkupLine($"[red]--redo: the run has no setpoint {string.Join(", ", unknown)}.[/] Its setpoints are 1 to {resumedRun.Info.Plan.Max(p => p.Index)}; its report.md lists them in order.");
+            return 1;
+        }
         var resumedOven = resumedRun?.Info.Oven;
         var ovenProfile = OvenProfiles.Find(s.Oven) ?? resumedOven ?? OvenProfiles.Find(appSettings.LastOven) ?? OvenProfiles.Default;
         var driver = ChooseDriver(s, appSettings);
@@ -357,15 +412,15 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
         if (resumed is null && s is CharacteriseSettings) plan = [.. plan.Select(p => p with { AdjustmentC = adjustmentC ?? 0 })];
 
         // When resuming, everything the earlier sittings measured, with the plan's adjustment for each. The setpoints
-        // that finished (by themselves or by choice) are done; the others (interrupted or skipped) are measured again,
-        // and until they are, their earlier result stays in the results, as analyze shows it.
+        // that finished (by themselves or by choice) are done; the others (interrupted or skipped), and those given to
+        // --redo, are measured again, and until they are, their earlier result stays in the results, as analyze shows it.
         var earlier = resumed is null ? [] : Replay.Analyze(resumed.Csv, options, plan)
             .Select(r => r with { Point = plan.FirstOrDefault(p => p.Index == r.Point.Index) ?? r.Point })
             .ToList();
         var done = earlier
             .Where(r => r.Metrics.Reason is CompletionReason.Converged or CompletionReason.TimedOut or CompletionReason.Manual)
             .ToList();
-        var todo = plan.Where(p => done.All(d => d.Point.Index != p.Index)).ToList();
+        var todo = ResumeOrder(plan, done.Select(d => d.Point.Index), redo, resumed?.Info.AdjustmentC);
         if (resumed is not null && todo.Count == 0 && resumed.Info.Characterise is not { ChangedToC: null })
         {
             AnsiConsole.MarkupLine($"[green]Every setpoint in {Markup.Escape(resumed.Folder)} is already done.[/] [bold]oventracker analyze[/] re-reads it.");
@@ -387,13 +442,17 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
             Border(BoxBorder.Rounded).BorderColor(Color.Grey35));
 
         if (resumed is not null)
-            AnsiConsole.MarkupLine($"[bold]Carrying on[/] {Markup.Escape(resumed.Folder)}: {plan.Count - todo.Count} of {plan.Count} setpoints done.");
+        {
+            var again = todo.Count(p => done.Any(d => d.Point.Index == p.Index));
+            AnsiConsole.MarkupLine($"[bold]Carrying on[/] {Markup.Escape(resumed.Folder)}: {plan.Count - todo.Count} of {plan.Count} setpoints done" +
+                                   (again > 0 ? $", and {again} to measure again." : "."));
+        }
         var planTable = new Table().Border(TableBorder.Rounded).BorderColor(Color.Grey35).AddColumn("#").AddColumn("Mode").AddColumn("Setting");
         if (resumed is not null) planTable.AddColumn("");
         foreach (var tp in plan)
         {
             var row = new List<string> { tp.Index.ToString(Inv), Temp.ModeName(tp.Mode), Markup.Escape(f.Setpoint(tp.SetpointC)) };
-            if (resumed is not null) row.Add(todo.Contains(tp) ? "to do" : "[green]done[/]");
+            if (resumed is not null) row.Add(!todo.Contains(tp) ? "[green]done[/]" : done.Any(d => d.Point.Index == tp.Index) ? "[yellow]redo[/]" : "to do");
             planTable.AddRow(row.ToArray());
         }
         AnsiConsole.Write(planTable);
@@ -490,6 +549,47 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
         }
         PointResult? previous = null; // the setpoint just measured in this sitting, if the oven went straight on from it
         var firstPrompt = true;
+        // What the oven's thermostat adjustment is set to, as far as the app knows. A resumed sitting doesn't know: the
+        // oven may have been used, or the last sitting stopped part way through changing it.
+        var ovenAdjustmentC = resumed is not null ? null : characterising ? adjustmentC ?? 0 : adjustmentC;
+        var redone = new HashSet<int>(); // the setpoints measured in this sitting
+
+        // Before a setpoint with its own adjustment (a characterise run's), when the oven isn't known to be at it: asks
+        // for it to be set. False if it can't go on.
+        async Task<bool> SetAdjustmentForAsync(int ti)
+        {
+            var wantC = todo[ti].AdjustmentC!.Value;
+            var report = new Report(info, results);
+            var toText = report.Adjustment(wantC);
+            var these = todo.Skip(ti).TakeWhile(p => p.AdjustmentC is { } a && SameAdjustment(a, wantC)).Select(p => p.Index).ToList();
+            var which = these.Count == 1 ? $"Setpoint {these[0]} is" : $"Setpoints {string.Join(", ", these)} are";
+            if (ask)
+            {
+                var steps = ovenProfile.HowToChange is { Count: > 0 } h && !ovenProfile.IsGeneric
+                    ? $" To set it on the {ovenProfile.Name}: {string.Join(" ", h.Select((x, i) => $"{i + 1}. {x}"))}"
+                    : "";
+                var change = ovenAdjustmentC is { } from
+                    ? $"Change the oven's thermostat adjustment from {report.Adjustment(from)} to {toText}."
+                    : $"Check the oven's thermostat adjustment is {toText}, and set it if it isn't.";
+                var text = $"{(lastDone is null ? "" : lastDone + " ")}{which} measured at an adjustment of {toText}. {change}{steps}";
+                if (!await prompt.AskToSetAdjustmentAsync(text, toText, ct))
+                {
+                    AnsiConsole.MarkupLine("[yellow]Stopped before changing the adjustment. Carry on later with --resume: it asks for it again.[/]");
+                    return false;
+                }
+            }
+            else if (!driver.IsSimulation && !(ovenAdjustmentC is null && SameAdjustment(wantC, info.AdjustmentC ?? 0)))
+            {
+                // No one to ask (--yes, or no keyboard). The run's own adjustment is taken to be set, as it always was; any other can't be.
+                AnsiConsole.MarkupLine($"[yellow]{Markup.Escape(which)} measured at an adjustment of {Markup.Escape(toText)}. Set it, then carry on with --resume.[/]");
+                return false;
+            }
+            oven?.SetAdjustment(wantC); // the simulated oven
+            ovenAdjustmentC = wantC;
+            recorder.Note(recorder.Now, $"adjustment-set:{wantC.ToString("F3", Inv)}");
+            lastDone = $"The adjustment is {toText} now.";
+            return true;
+        }
 
         // Characterise, phase 2: change the adjustment (towards correct, by at least --step), then the lowest and
         // highest setpoints again in each mode, highest first so the oven cools only once. False if it can't go on.
@@ -527,6 +627,7 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
                 return false;
             }
             oven?.SetAdjustment(to); // the simulated oven
+            ovenAdjustmentC = to;
 
             var next = plan.Max(p => p.Index) + 1;
             var phase2 = new List<TestPoint>();
@@ -556,6 +657,12 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
                 AnsiConsole.WriteLine();
                 AnsiConsole.Write(new Rule($"[orange1]{point.Index} of {plan.Count}: {Temp.ModeName(point.Mode)} {Markup.Escape(f.Setpoint(point.SetpointC))}[/]").LeftJustified());
                 var label = $"{Temp.ModeName(point.Mode)} {f.Setpoint(point.SetpointC)}";
+                if (point.AdjustmentC is { } pointAdjustC && !(ovenAdjustmentC is { } nowAdjustC && SameAdjustment(nowAdjustC, pointAdjustC))
+                    && !await SetAdjustmentForAsync(ti))
+                {
+                    stopped = true;
+                    break;
+                }
                 var targetC = ResetWaiter.TargetFor(plan, point, ambientC ?? AssumedAmbientC);
                 ChangeChoice choice;
                 var hotAtPrompt = false; // how the oven was when asked, before anyone started it for this setpoint
@@ -603,6 +710,7 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
                 afterReset = false;
                 results.RemoveAll(r => r.Point.Index == point.Index);
                 results.Add(result);
+                redone.Add(point.Index);
                 // Saved as each setpoint finishes, so a crash, a closed window or a second Ctrl+C loses at most the
                 // setpoint in progress, not the report (#43). A save that fails (a full disk) mustn't stop the measuring.
                 try { SaveResults(); }
@@ -652,8 +760,16 @@ public sealed class RunCommand : AsyncCommand<RunSettings>
         if (info.Characterise is { ChangedToC: not null })
             SaveCharacterisation(info, results, outDir, ovenProfile, save: !driver.IsSimulation);
         var left = plan.Count(p => !results.Any(r => r.Point.Index == p.Index && r.Metrics.Reason is CompletionReason.Converged or CompletionReason.TimedOut or CompletionReason.Manual));
-        if (left > 0)
-            AnsiConsole.MarkupLine($"{left} setpoint{(left == 1 ? "" : "s")} still to do. To carry on later, even after using the oven: [bold]oventracker run --resume \"{Markup.Escape(outDir)}\"[/]");
+        // Setpoints given to --redo that this sitting didn't get to still hold their old result, so carrying on needs --redo again.
+        var notRedone = redo.Where(i => !redone.Contains(i) && results.Any(r => r.Point.Index == i && r.Metrics.Reason is CompletionReason.Converged or CompletionReason.TimedOut or CompletionReason.Manual)).ToList();
+        if (left > 0 || notRedone.Count > 0)
+        {
+            var count = notRedone.Count == 0 ? $"{left} setpoint{(left == 1 ? "" : "s")} still to do"
+                : left == 0 ? $"{notRedone.Count} setpoint{(notRedone.Count == 1 ? "" : "s")} still to measure again"
+                : $"{left} setpoint{(left == 1 ? "" : "s")} still to do, and {notRedone.Count} to measure again";
+            var again = notRedone.Count > 0 ? $" --redo {string.Join(",", notRedone)}" : "";
+            AnsiConsole.MarkupLine($"{count}. To carry on later, even after using the oven: [bold]oventracker run --resume \"{Markup.Escape(outDir)}\"{again}[/]");
+        }
         AnsiConsole.MarkupLine("[grey]Turn the oven off.[/]");
         if (failure is not null)
         {
