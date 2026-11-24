@@ -82,7 +82,7 @@ def test_a_characterise_runs_setpoints_are_measured_again_at_their_own_adjustmen
 
     p = run_app("run", "--simulate", "-y", "--speed", "3000", "--interval", "10", "--resume", str(out), "--redo", "2-3")
     assert p.returncode == 0, p.stdout + p.stderr
-    assert "and 2 to measure again" in p.stdout
+    assert "and 2 to measure again" in " ".join(p.stdout.split())  # however the long folder name wraps the line
 
     lines = (out / "readings.csv").read_text(encoding="utf-8").splitlines()
     resumed_at = max(i for i, line in enumerate(lines) if line.rstrip().endswith(",resume"))

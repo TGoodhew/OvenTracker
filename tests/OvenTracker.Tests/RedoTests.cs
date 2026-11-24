@@ -120,7 +120,7 @@ public class RedoTests
             // Setpoint 2 (425 at 0) and 3 (425 at the new adjustment) again.
             (code, output) = await Run<RunCommand>("--simulate", "--speed", "3000", "--interval", "5", "-y", "--resume", dir, "--redo", "2-3");
             Assert.Equal(0, code);
-            Assert.Contains("and 2 to measure again", output);
+            Assert.Contains("and 2 to measure again", string.Join(" ", output.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))); // however the long folder name wraps the line
 
             var lines = File.ReadAllLines(csv);
             var resumedAt = Array.FindLastIndex(lines, l => l.EndsWith(",resume", StringComparison.Ordinal));

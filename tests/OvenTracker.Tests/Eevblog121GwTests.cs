@@ -141,11 +141,13 @@ public class Eevblog121GwTests
     {
         var link = new FakeLink();
         using var meter = new Eevblog121GwMeter(link) { Timeout = TimeSpan.FromSeconds(2) };
-        var feeder = Task.Run(async () =>
+        // A thread of its own: Connect blocks this one, and with other tests busy the thread pool may not run a
+        // pooled feeder before the 2 s timeout.
+        var feeder = Task.Factory.StartNew(() =>
         {
-            while (!link.Opened) await Task.Delay(5);
+            while (!link.Opened) Thread.Sleep(5);
             link.Send(Packet(5, 0x20, 1800, b15: 0x06));
-        });
+        }, TaskCreationOptions.LongRunning);
         var id = meter.Connect();
         await feeder;
         Assert.Equal("121GW", id.Model);
