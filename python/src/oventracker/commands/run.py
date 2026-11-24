@@ -61,6 +61,7 @@ class RunSettings(SharedSettings):
     interval: float = 1.0
     out: str | None = None
     resume: str | None = None
+    redo: str | None = None
     ambient: float | None = None
     sim_hot: float | None = None
     remind: float = 1.0
@@ -109,6 +110,10 @@ class RunSettings(SharedSettings):
             or not os.path.isfile(os.path.join(self.resume, "readings.csv"))
         ):
             return f"--resume needs a run's folder, with session.json and readings.csv: {self.resume}"
+        if self.redo is not None and self.resume is None:
+            return "--redo goes with --resume: it measures setpoints of a saved run again."
+        if self.redo is not None and parse_indexes(self.redo) is None:
+            return "--redo must be setpoint numbers or ranges, e.g. 5-8 or 5,7."
         if self.setpoints is not None and parse_numbers(self.setpoints) is None:
             return "--setpoints must be numbers, e.g. 350,400,450."
         return None
@@ -167,6 +172,55 @@ def parse_numbers(text: str) -> list[float] | None:
     if not values:
         return None
     return sorted(set(values))
+
+
+def parse_indexes(text: str) -> list[int] | None:
+    """Setpoint numbers and ranges, e.g. 5-8 or 5,7 (or both: 2,5-8), in order, each once. None if any part isn't one."""
+    values: list[int] = []
+    for p in _split(text):
+        ends = p.split("-")
+        if len(ends) > 2 or not all(e.isascii() and e.isdigit() for e in ends):
+            return None
+        frm = int(ends[0])
+        to = int(ends[1]) if len(ends) == 2 else frm
+        if frm < 1 or to < frm:
+            return None
+        values.extend(range(frm, to + 1))
+    if not values:
+        return None
+    return sorted(set(values))
+
+
+def same_adjustment(a: float, b: float) -> bool:
+    """Two adjustments the same, allowing for the rounding of a value read back from session.json or readings.csv."""
+    return abs(a - b) < 1e-3
+
+
+def resume_order(plan: list[TestPoint], done: list[int], redo: list[int], run_adjustment_c: float | None) -> list[TestPoint]:
+    """What a resumed sitting measures, in order: the setpoints that haven't finished, and those in redo even though
+    they have. When the setpoints have their own adjustments (a characterise run's two phases), those at an adjustment
+    other than the run's are done first, each adjustment's together, so the adjustment is changed as few times as it
+    can be and the oven ends at the run's own. Otherwise in plan order (RunCommand.ResumeOrder)."""
+    finished = set(done)
+    again = set(redo)
+    todo = [p for p in plan if p.index in again or p.index not in finished]
+    if all(p.adjustment_c is None for p in todo):
+        return todo
+    run = run_adjustment_c if run_adjustment_c is not None else 0.0
+
+    def at(p: TestPoint) -> float:
+        return p.adjustment_c if p.adjustment_c is not None else run
+
+    groups: list[list[TestPoint]] = []
+    for p in todo:
+        if same_adjustment(at(p), run):
+            continue
+        group = next((g for g in groups if same_adjustment(at(g[0]), at(p))), None)
+        if group is not None:
+            group.append(p)
+        else:
+            groups.append([p])
+    return [p for g in groups for p in g] + [p for p in todo if same_adjustment(at(p), run)]
 
 
 def build_plan(modes: list[OvenMode], setpoints_c: list[float], grouped: bool) -> list[TestPoint]:
@@ -406,6 +460,15 @@ def _execute(s: RunSettings, token: CancellationToken) -> int:
     if s.resume is not None:
         resumed_run = load_run(s.resume)
         resumed_oven = resumed_run.info.oven if resumed_run is not None else None
+    redo = (parse_indexes(s.redo) or []) if s.redo is not None else []
+    if resumed_run is not None:
+        unknown = [i for i in redo if all(p.index != i for p in resumed_run.info.plan)]
+        if unknown:
+            c.print(
+                f"[red]--redo: the run has no setpoint {', '.join(str(i) for i in unknown)}.[/] Its setpoints are 1 to "
+                f"{max(p.index for p in resumed_run.info.plan)}; its report.md lists them in order."
+            )
+            return 1
     oven_profile = ovens.find(s.oven) or resumed_oven or ovens.find(app_settings.last_oven) or ovens.DEFAULT
     driver = choose_driver(s, app_settings)
     resource = s.resource if s.resource is not None else s.port
@@ -611,8 +674,8 @@ def _execute(s: RunSettings, token: CancellationToken) -> int:
         plan = [replace(p, adjustment_c=adjustment_c if adjustment_c is not None else 0.0) for p in plan]
 
     # When resuming, everything the earlier sittings measured, with the plan's adjustment for each. The setpoints
-    # that finished (by themselves or by choice) are done; the others (interrupted or skipped) are measured again,
-    # and until they are, their earlier result stays in the results, as analyze shows it.
+    # that finished (by themselves or by choice) are done; the others (interrupted or skipped), and those given to
+    # --redo, are measured again, and until they are, their earlier result stays in the results, as analyze shows it.
     earlier: list[PointResult] = []
     if resumed is not None:
         for r in replay(resumed.csv, options, plan):
@@ -623,7 +686,8 @@ def _execute(s: RunSettings, token: CancellationToken) -> int:
         for r in earlier
         if r.metrics.reason in (CompletionReason.Converged, CompletionReason.TimedOut, CompletionReason.Manual)
     ]
-    todo = [p for p in plan if all(d.point.index != p.index for d in done)]
+    todo = resume_order(plan, [d.point.index for d in done], redo, resumed.info.adjustment_c if resumed is not None else None)
+    done_indexes = {d.point.index for d in done}
     if resumed is not None and not todo and not (resumed.info.characterise is not None and resumed.info.characterise.changed_to_c is None):
         c.print(f"[green]Every setpoint in {ui.escape(resumed.folder)} is already done.[/] [bold]{APP_NAME} analyze[/] re-reads it.")
         meter.dispose()
@@ -649,12 +713,16 @@ def _execute(s: RunSettings, token: CancellationToken) -> int:
     )
 
     if resumed is not None:
-        c.print(f"[bold]Carrying on[/] {ui.escape(resumed.folder)}: {len(plan) - len(todo)} of {len(plan)} setpoints done.")
+        again = sum(1 for p in todo if p.index in done_indexes)
+        c.print(
+            f"[bold]Carrying on[/] {ui.escape(resumed.folder)}: {len(plan) - len(todo)} of {len(plan)} setpoints done"
+            + (f", and {again} to measure again." if again > 0 else ".")
+        )
     plan_table = table(["#", "Mode", "Setting"] + ([""] if resumed is not None else []))
     for tp in plan:
         row = [str(tp.index), mode_name(tp.mode), ui.escape(f.setpoint(tp.setpoint_c))]
         if resumed is not None:
-            row.append("to do" if tp in todo else "[green]done[/]")
+            row.append("[green]done[/]" if tp not in todo else "[yellow]redo[/]" if tp.index in done_indexes else "to do")
         plan_table.add_row(*(markup(x) for x in row))
     c.print(plan_table)
     if not s.grouped and len(modes) > 1:
@@ -786,7 +854,13 @@ def _execute(s: RunSettings, token: CancellationToken) -> int:
         "previous": None,  # the setpoint just measured in this sitting, if the oven went straight on from it
         "plan": plan,
         "info": info,
+        # What the oven's thermostat adjustment is set to, as far as the app knows. A resumed sitting doesn't know: the
+        # oven may have been used, or the last sitting stopped part way through changing it.
+        "oven_adjustment_c": None
+        if resumed is not None
+        else ((adjustment_c if adjustment_c is not None else 0.0) if characterising else adjustment_c),
     }
+    redone: set[int] = set()  # the setpoints measured in this sitting
     failure: BaseException | None = None
     prompt = ChangePrompt(poller, recorder, f, s.remind * 60, token)
     ask = should_ask(s.yes, driver.is_simulation, ui.keys())
@@ -798,6 +872,48 @@ def _execute(s: RunSettings, token: CancellationToken) -> int:
         now = Report(st["info"], results)
         recorder.write_results(st["info"], results, now.markdown())
         return now
+
+    def set_adjustment_for(ti: int) -> bool:
+        """Before a setpoint with its own adjustment (a characterise run's), when the oven isn't known to be at it: asks
+        for it to be set. False if it can't go on."""
+        want_c: float = todo[ti].adjustment_c  # type: ignore[assignment]
+        report = Report(st["info"], results)
+        to_text = report.adjustment(want_c)
+        these: list[int] = []
+        for p in todo[ti:]:
+            if p.adjustment_c is None or not same_adjustment(p.adjustment_c, want_c):
+                break
+            these.append(p.index)
+        which = f"Setpoint {these[0]} is" if len(these) == 1 else f"Setpoints {', '.join(str(i) for i in these)} are"
+        now_c = st["oven_adjustment_c"]
+        if ask:
+            steps = (
+                f" To set it on the {oven_profile.name}: {' '.join(f'{i + 1}. {x}' for i, x in enumerate(oven_profile.how_to_change))}"
+                if oven_profile.how_to_change and not oven_profile.is_generic
+                else ""
+            )
+            change = (
+                f"Change the oven's thermostat adjustment from {report.adjustment(now_c)} to {to_text}."
+                if now_c is not None
+                else f"Check the oven's thermostat adjustment is {to_text}, and set it if it isn't."
+            )
+            last = st["last_done"]
+            text = f"{'' if last is None else last + ' '}{which} measured at an adjustment of {to_text}. {change}{steps}"
+            if not prompt.ask_to_set_adjustment(text, to_text):
+                c.print("[yellow]Stopped before changing the adjustment. Carry on later with --resume: it asks for it again.[/]")
+                return False
+        elif not driver.is_simulation and not (
+            now_c is None and same_adjustment(want_c, st["info"].adjustment_c if st["info"].adjustment_c is not None else 0.0)
+        ):
+            # No one to ask (--yes, or no keyboard). The run's own adjustment is taken to be set, as it always was; any other can't be.
+            c.print(f"[yellow]{ui.escape(which)} measured at an adjustment of {ui.escape(to_text)}. Set it, then carry on with --resume.[/]")
+            return False
+        if oven is not None:
+            oven.set_adjustment(want_c)  # the simulated oven
+        st["oven_adjustment_c"] = want_c
+        recorder.note(recorder.now, f"adjustment-set:{fixed(want_c, 3)}")
+        st["last_done"] = f"The adjustment is {to_text} now."
+        return True
 
     def plan_phase2() -> bool:
         """Characterise, phase 2: change the adjustment (towards correct, by at least --step), then the lowest and
@@ -845,6 +961,7 @@ def _execute(s: RunSettings, token: CancellationToken) -> int:
             return False
         if oven is not None:
             oven.set_adjustment(to)  # the simulated oven
+        st["oven_adjustment_c"] = to
 
         plan_now: list[TestPoint] = st["plan"]
         nxt = max(p.index for p in plan_now) + 1
@@ -878,6 +995,14 @@ def _execute(s: RunSettings, token: CancellationToken) -> int:
                     c.print()
                     c.print(Rule(f"[orange1]{point.index} of {len(plan_now)}: {mode_name(point.mode)} {ui.escape(f.setpoint(point.setpoint_c))}[/]"))
                     label = f"{mode_name(point.mode)} {f.setpoint(point.setpoint_c)}"
+                    now_adjust_c = st["oven_adjustment_c"]
+                    if (
+                        point.adjustment_c is not None
+                        and not (now_adjust_c is not None and same_adjustment(now_adjust_c, point.adjustment_c))
+                        and not set_adjustment_for(ti)
+                    ):
+                        st["stopped"] = True
+                        break
                     target_c = target_for(plan_now, point, assumed)
                     hot_at_prompt = False  # how the oven was when asked, before anyone started it for this setpoint
                     while True:
@@ -944,6 +1069,7 @@ def _execute(s: RunSettings, token: CancellationToken) -> int:
                     st["after_reset"] = False
                     results[:] = [r for r in results if r.point.index != point.index]
                     results.append(result)
+                    redone.add(point.index)
                     # Saved as each setpoint finishes, so a crash, a closed window or a second Ctrl+C loses at most the
                     # setpoint in progress, not the report (#43). A save that fails (a full disk) mustn't stop the measuring.
                     try:
@@ -1012,10 +1138,21 @@ def _execute(s: RunSettings, token: CancellationToken) -> int:
             for r in results
         )
     )
-    if left > 0:
+    # Setpoints given to --redo that this sitting didn't get to still hold their old result, so carrying on needs --redo again.
+    finished_reasons = (CompletionReason.Converged, CompletionReason.TimedOut, CompletionReason.Manual)
+    not_redone = [i for i in redo if i not in redone and any(r.point.index == i and r.metrics.reason in finished_reasons for r in results)]
+    if left > 0 or not_redone:
+        n = len(not_redone)
+        if not not_redone:
+            count = f"{left} setpoint{'' if left == 1 else 's'} still to do"
+        elif left == 0:
+            count = f"{n} setpoint{'' if n == 1 else 's'} still to measure again"
+        else:
+            count = f"{left} setpoint{'' if left == 1 else 's'} still to do, and {n} to measure again"
+        again_opt = f" --redo {','.join(str(i) for i in not_redone)}" if not_redone else ""
         c.print(
-            f"{left} setpoint{'' if left == 1 else 's'} still to do. To carry on later, even after using the oven: "
-            f'[bold]{APP_NAME} run --resume "{ui.escape(out_dir)}"[/]'
+            f"{count}. To carry on later, even after using the oven: "
+            f'[bold]{APP_NAME} run --resume "{ui.escape(out_dir)}"{again_opt}[/]'
         )
     c.print("[grey]Turn the oven off.[/]")
     if failure is not None:

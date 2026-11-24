@@ -124,6 +124,7 @@ Session events (`point` 0):
 | `reset-start` | A wait for the oven to cool began. | Nothing. |
 | `reset-end:<outcome>` | The wait ended: `Ready` (it cooled enough), `CarryOn` (the user carried on before it did) or `Quit`. | Nothing. |
 | `adjustment-changed:<°C>` | Characterise: phase 2 began at this adjustment, written with `F3`, e.g. `adjustment-changed:-5.556`. `session.json` is rewritten at the same time. | Nothing. |
+| `adjustment-set:<°C>` | A resumed characterise run: the oven's adjustment was checked or changed for the next setpoint's own (`adjustmentC` in the plan), written with `F3`, e.g. `adjustment-set:0.000`. Written once the prompt is answered, or straight away in a simulation. | Nothing. |
 | `prompt:<text>` | A prompt was shown, e.g. `prompt:SET THE OVEN TO BAKE 350 °F`. | Nothing. |
 | `answered:<choice>:<n>s` | The prompt was answered after *n* whole seconds. `<choice>` is `Start`, `Skip`, `Finish` or `Wait` for the change prompt, `True` or `False` for the adjustment prompt, `True` for the turn-off prompt. | Nothing. |
 
@@ -146,8 +147,12 @@ readings.
 `run --resume <folder>` opens the same `readings.csv` and appends to it. The header is written only if the
 file is missing or empty. The first row of the new sitting is the `resume` event; readings outside a setpoint
 follow. Setpoints that finished as `Converged`, `TimedOut` or `Manual` in an earlier sitting are not measured
-again. The others (`Aborted`, `Skipped`, or never started) are, each with a new `start`, and replay keeps the
-last attempt at each index. `session.json` is rewritten with the new sitting added to `sittings`, and with
+again, unless they are given to `--redo`. The others (`Aborted`, `Skipped`, or never started) are, each with a
+new `start`, and replay keeps the last attempt at each index. They go in plan order, except when the setpoints
+have their own adjustments (a characterise run): then those at an adjustment other than the session's
+`adjustmentC` go first, each adjustment's together, in plan order, and those at the session's go last. Before
+the first setpoint of the sitting, and whenever the next one's adjustment differs from the last, the app asks
+for the adjustment and writes `adjustment-set`. `session.json` is rewritten with the new sitting added to `sittings`, and with
 the adjustment, adjustment options, oven, ambient temperature and sensor as given for this sitting.
 
 ### Example

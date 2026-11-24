@@ -87,6 +87,7 @@ RUN = SHARED + [
     Opt("--interval", "SEC", "float", "interval", "Seconds between readings.", "1"),
     Opt("-o|--out", "DIR", "str", "out", "Folder for the readings and report. Default: OvenTracker/<date time> in your Documents folder (on Linux, ~/Documents, or ~ if there is none)."),
     Opt("--resume", "FOLDER", "str", "resume", "Carry on a run saved earlier: measure the setpoints it didn't finish, adding to the same folder and report. If the oven is still hot, the app waits for it to cool first."),
+    Opt("--redo", "LIST", "str", "redo", "With --resume, measure these setpoints again even though they finished, e.g. 5-8 or 5,7. Give the numbers the run's plan shows. The new attempt replaces the old one in the report. In a characterise run, the app asks for each setpoint's adjustment."),
     Opt("--ambient", "TEMP", "float", "ambient", "Room temperature, in the oven's unit. Normally the probe's first reading with the oven cold; give it if the oven is hot when you start."),
     Opt("--sim-hot", "TEMP", "float", "sim_hot", "With --simulate, start as if the oven had just been used at this temperature, in the oven's unit.", hidden=True),
     Opt("--remind", "MINUTES", "float", "remind", "While waiting for the oven to be changed (or turned off), beep again every this many minutes. 0 for no repeats.", "1"),

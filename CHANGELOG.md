@@ -6,6 +6,18 @@ entry says which implementations have the change: **both**, **C#** (the Python p
 
 ## Unreleased
 
+- Measure setpoints of a saved run again: `run --resume <folder> --redo 6-8`. Has: **both**.
+  - **Replaces the old attempt:** the new one replaces it in the report, `results.json` and the
+    characterisation. The old readings stay in `readings.csv`, where replay already kept the last attempt at each
+    setpoint.
+  - **Characterise runs:** each setpoint is measured at its own phase's adjustment. A resumed sitting asks you to
+    check the adjustment before its first setpoint, and to change it when the next setpoint needs another,
+    recorded as `adjustment-set:<°C>`. Setpoints at the other adjustment go first, so the oven ends at the run's
+    own.
+  - **Fixed:** resuming a characterise run no longer measures a phase-1 setpoint left unfinished at phase 2's
+    adjustment without saying so.
+  - **Carrying on:** a sitting stopped before its redos are done prints the command with `--redo` again.
+
 ## 1.0.0 (2026-11-21)
 
 The first release.

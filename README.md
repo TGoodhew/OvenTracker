@@ -221,6 +221,19 @@ OvenTracker.exe run --resume "$HOME\Documents\OvenTracker\2026-11-20 1400"
 It measures the setpoints that weren't finished, adds them to the same folder, and writes one report over
 both sittings. A run that was cut off (closed, crashed, or the PC slept) can be resumed the same way.
 
+To measure setpoints again that did finish but went wrong (the oven was set to the wrong mode or
+temperature, say), give their numbers, as the run's plan and report list them, to `--redo`:
+
+```powershell
+OvenTracker.exe run --resume "$HOME\Documents\OvenTracker\2026-11-20 1400" --redo 6-8
+```
+
+The new attempt replaces the old one in the report, `results.json` and, for a characterise run, the
+characterisation. The old readings stay in `readings.csv`. In a characterise run, each setpoint is measured
+at the adjustment it was planned at. The app asks you to check the adjustment before the first setpoint and
+to change it when the next setpoint needs another. It does the setpoints at the other adjustment first, so the
+oven ends at the run's own.
+
 If the oven is still hot, the app first waits for it to cool, so the next setpoint starts the way it would
 have in one go: from just above the setpoint before it (or from cold, for the first). While it waits, it
 shows the oven cooling and predicts when it will be ready. It learns how fast your oven cools as it goes,
